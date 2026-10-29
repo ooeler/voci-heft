@@ -49,14 +49,16 @@ Dieser Schlüssel darf öffentlich sein. Den **service_role**-Schlüssel darfst 
 
 ## 5. App ins Internet stellen
 
-Am einfachsten geht es mit **Netlify Drop**, ohne eigenes Konto auf einem Server:
+Die App liegt auf GitHub unter <https://github.com/ooeler/voci-heft>. **GitHub Pages** veröffentlicht sie automatisch unter:
 
-1. Gehe auf <https://app.netlify.com/drop>.
-2. Ziehe den ganzen Ordner `voci-web` in das Feld.
-3. Netlify zeigt eine Adresse wie `https://zufallsname.netlify.app`. Unter „Site settings“ kannst du einen schöneren Namen wählen.
-4. Trage diese Adresse in Supabase als **Site URL** ein (Schritt 3).
+**<https://ooeler.github.io/voci-heft/>**
 
-Andere Möglichkeiten sind GitHub Pages und Cloudflare Pages. Wichtig ist nur, dass die Adresse mit `https://` beginnt. Sonst funktionieren das Installieren und der Offline-Modus nicht.
+Jede Änderung, die auf den Zweig `main` kommt, ist nach etwa einer Minute online. Den Stand siehst du im Repository unter **Actions**.
+
+1. Ändere `config.js` direkt auf GitHub: Öffne die Datei, klicke auf den Stift (Bearbeiten), trage URL und Schlüssel ein und klicke auf **Commit changes**.
+2. Trage `https://ooeler.github.io/voci-heft/` in Supabase als **Site URL** ein (Schritt 3).
+
+Weil das Repository öffentlich ist, kann jede Person den Code und den Inhalt von `config.js` sehen. Der „anon public“-Schlüssel ist dafür gedacht und darf dort stehen. Den **service_role**-Schlüssel, das Datenbank-Passwort und einen Claude-Schlüssel darfst du nie ins Repository schreiben.
 
 ## 6. Auf dem Handy oder Tablet installieren
 
@@ -103,4 +105,4 @@ Wenn die App ein Fremdwort vorliest, zeigt sie es in Silben getrennt an, zum Bei
 
 ## Eine neue Version hochladen
 
-Wenn du Dateien änderst, erhöhe in `sw.js` die Zeile `const VERSION = "voci-heft-v1";` (zum Beispiel auf `v2`). Ziehe danach den Ordner wieder in Netlify Drop. Die Geräte laden die neue Version beim nächsten Öffnen.
+Wenn du Dateien änderst, erhöhe in `sw.js` die Zeile `const VERSION = "voci-heft-v2";` (zum Beispiel auf `v3`). Lade die Änderung danach auf GitHub hoch, GitHub Pages veröffentlicht sie automatisch. Die Geräte laden die neue Version beim nächsten Öffnen.
