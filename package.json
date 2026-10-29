@@ -1,0 +1,19 @@
+{
+  "name": "voci-heft",
+  "private": true,
+  "description": "Voci-Wörtli per Foto scannen und lernen.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
+    "@supabase/supabase-js": "2.117.3",
+    "hyphen": "1.14.1",
+    "tesseract.js": "7.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.11"
+  }
+}

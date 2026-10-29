@@ -1,0 +1,43 @@
+# Prüft Updates von Dependabot und übernimmt sie automatisch, wenn der Build klappt.
+# Grosse Versionssprünge (Major) können die App verändern und bleiben zum Prüfen offen.
+name: Updates übernehmen
+
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+
+  merge:
+    needs: check
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'ooeler/voci-heft'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+      - if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr merge "$PR" --squash --delete-branch
+          # Änderungen durch GITHUB_TOKEN starten keinen push-Workflow, darum direkt veröffentlichen
+          gh workflow run deploy.yml --repo "$REPO" --ref main

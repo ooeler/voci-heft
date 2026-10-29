@@ -1,6 +1,7 @@
-// Hält die App offline verfügbar. Bei jeder neuen Version VERSION erhöhen.
-const VERSION = "voci-heft-v2";
-const SHELL = ["./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
+// Hält die App offline verfügbar. VERSION setzt build.mjs bei jedem Build automatisch.
+const VERSION = "voci-heft-dev";
+const SHELL = ["./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest", "vendor/supabase.js", "vendor/hyphen/hyphen.js", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
+// Schriften und die Sprachdaten der Texterkennung (keine Programme, nur Daten)
 const CDN = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"];
 
 self.addEventListener("install", e => {
@@ -15,14 +16,15 @@ self.addEventListener("fetch", e => {
   // Eigene Dateien: zuerst Netz (damit Änderungen ankommen), sonst Zwischenspeicher
   if (url.origin === location.origin) {
     e.respondWith(fetch(e.request).then(r => {
-      const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); return r;
+      if (r.ok) { const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
+      return r;
     }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match("index.html"))));
     return;
   }
-  // Bibliotheken und Schriften: feste Versionen, darum zuerst Zwischenspeicher
+  // Schriften und Sprachdaten: feste Versionen, darum zuerst Zwischenspeicher
   if (CDN.includes(url.hostname)) {
     e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(r => {
-      if (r.ok || r.type === "opaque") { const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
+      if (r.ok) { const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
       return r;
     })));
   }

@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Erlaubt nur Programmcode von dieser Seite. Verbindungen nur zu Supabase, Claude und den Sprachdaten. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="no-referrer">
 <title>Voci-Heft</title>
 <meta name="description" content="Voci-Wörtli per Foto scannen und lernen.">
 <meta name="theme-color" content="#2049c9">
@@ -30,7 +33,7 @@
   <main id="app" class="stack"></main>
 </div>
 <div id="toasts" aria-live="polite"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+<script src="vendor/supabase.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
 </body>

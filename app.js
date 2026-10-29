@@ -22,8 +22,8 @@ const EXAMPLE = {
 };
 const SPEAKER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
 const STAR = (on = true) => `<svg class="star ${on ? "on" : ""}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>`;
-const TESSERACT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js";
-const ANTHROPIC_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.133.0/+esm";
+const TESSERACT_URL = "vendor/tesseract.min.js";
+const ANTHROPIC_URL = "./vendor/anthropic.js";
 const MAX_PHOTOS = 5;
 
 const $ = s => document.querySelector(s);
@@ -51,13 +51,40 @@ const cacheKey = () => "voci-heft-user-" + user.id;
 const saveCache = () => lsSet(cacheKey(), { lists, profile, pending: pending });
 let pending = { lists: [], deleted: [], profile: false };
 
+/* Daten aus Sicherungsdateien, Server und Zwischenspeicher nie ungeprüft übernehmen.
+   Die Grenzen entsprechen den Regeln in datenbank.sql. */
+const MAX_WORDS = 1000, MAX_TEXT = 300, MAX_NAME = 120;
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const int = (v, max = 1e9) => Math.min(max, Math.max(0, Math.floor(Number(v)) || 0));
+const str = (v, max) => (typeof v === "string" ? v : "").slice(0, max);
+function normalizeList(l) {
+  if (!l || typeof l !== "object" || !ID_RE.test(String(l.id)) || !Array.isArray(l.words)) return null;
+  return {
+    id: String(l.id),
+    name: str(l.name, MAX_NAME),
+    lang: LANGS.some(x => x[0] === l.lang) ? l.lang : "",
+    words: l.words.filter(w => w && typeof w === "object").slice(0, MAX_WORDS)
+      .map(w => ({ d: str(w.d, MAX_TEXT), f: str(w.f, MAX_TEXT), ok: int(w.ok, 1e6), ko: int(w.ko, 1e6) })),
+    points: int(l.points), best: int(l.best)
+  };
+}
+function normalizeProfile(p) {
+  const out = emptyProfile();
+  if (!p || typeof p !== "object") return out;
+  out.xp = int(p.xp);
+  for (const k of Object.keys(out.stats)) out.stats[k] = int(p.stats?.[k]);
+  for (const b of BADGES) if (p.badges?.[b.id]) out.badges[b.id] = typeof p.badges[b.id] === "number" ? p.badges[b.id] : true;
+  return out;
+}
+const normalizeLists = arr => (Array.isArray(arr) ? arr : []).map(normalizeList).filter(Boolean);
+const ids = arr => (Array.isArray(arr) ? arr : []).filter(x => ID_RE.test(String(x)));
+
 function startSession(u) {
   user = u;
   const c = lsGet(cacheKey(), null);
-  lists = c?.lists || [];
-  profile = Object.assign(emptyProfile(), c?.profile || {});
-  profile.stats = Object.assign(emptyProfile().stats, profile.stats);
-  pending = c?.pending || { lists: [], deleted: [], profile: false };
+  lists = normalizeLists(c?.lists);
+  profile = normalizeProfile(c?.profile);
+  pending = { lists: ids(c?.pending?.lists), deleted: ids(c?.pending?.deleted), profile: !!c?.pending?.profile };
   go({ name: "home" });
   if (!user.local) pullRemote();
 }
@@ -71,11 +98,9 @@ async function pullRemote() {
     ]);
     if (e1 || e2) throw e1 || e2;
     const keepLocal = new Set(pending.lists);
-    lists = [...lists.filter(l => keepLocal.has(l.id)), ...rl.filter(l => !keepLocal.has(l.id))];
-    if (rp && !pending.profile) {
-      profile = Object.assign(emptyProfile(), rp);
-      profile.stats = Object.assign(emptyProfile().stats, rp.stats || {});
-    } else if (!rp) { pending.profile = true; await flush(); }
+    lists = [...lists.filter(l => keepLocal.has(l.id)), ...normalizeLists(rl).filter(l => !keepLocal.has(l.id))];
+    if (rp && !pending.profile) profile = normalizeProfile(rp);
+    else if (!rp) { pending.profile = true; await flush(); }
     saveCache();
     if (view.name === "home") render();
   } catch (e) { console.warn("Laden vom Server fehlgeschlagen", e); }
@@ -85,20 +110,21 @@ async function flush() {
   if (!user || user.local || !sb) return;
   try {
     for (const id of [...pending.deleted]) {
-      const { error } = await sb.from("lists").delete().eq("id", id);
+      const { error } = await sb.from("lists").delete().eq("user_id", user.id).eq("id", id);
       if (error) throw error;
       pending.deleted = pending.deleted.filter(x => x !== id);
     }
     for (const id of [...pending.lists]) {
-      const l = lists.find(x => x.id === id);
+      const l = normalizeList(lists.find(x => x.id === id));
       if (l) {
-        const { error } = await sb.from("lists").upsert({ id: l.id, user_id: user.id, name: l.name, lang: l.lang, words: l.words, points: l.points || 0, best: l.best || 0, updated_at: new Date().toISOString() });
+        const { error } = await sb.from("lists").upsert({ ...l, user_id: user.id, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
         if (error) throw error;
       }
       pending.lists = pending.lists.filter(x => x !== id);
     }
     if (pending.profile) {
-      const { error } = await sb.from("profiles").upsert({ user_id: user.id, xp: profile.xp, stats: profile.stats, badges: profile.badges, updated_at: new Date().toISOString() });
+      const p = normalizeProfile(profile);
+      const { error } = await sb.from("profiles").upsert({ user_id: user.id, xp: p.xp, stats: p.stats, badges: p.badges, updated_at: new Date().toISOString() });
       if (error) throw error;
       pending.profile = false;
     }
@@ -245,7 +271,7 @@ function speak(text, lang, el) {
 }
 
 /* ---------- Silbentrennung ---------- */
-const HYPHEN_BASE = "https://cdn.jsdelivr.net/npm/hyphen@1.14.1/";
+const HYPHEN_BASE = "vendor/hyphen/";
 const HYPHEN_FILES = { "en-GB": ["en-gb", "EnGb"], "fr-FR": ["fr", "Fr"], "it-IT": ["it", "It"], "es-ES": ["es", "Es"], "pt-PT": ["pt", "Pt"], "nl-NL": ["nl", "Nl"], "la": ["la", "La"] };
 const hyphenators = {};
 async function loadHyphenator(lang) {
@@ -349,7 +375,7 @@ function renderLogin(app) {
       <form id="authForm" class="stack">
         ${signup ? `<div class="field"><label class="label" for="aname">Dein Name</label><input type="text" id="aname" autocomplete="nickname" required maxlength="30"></div>` : ""}
         <div class="field"><label class="label" for="aemail">E-Mail</label><input type="email" id="aemail" autocomplete="email" required></div>
-        <div class="field"><label class="label" for="apass">Passwort</label><input type="password" id="apass" autocomplete="${signup ? "new-password" : "current-password"}" minlength="6" required></div>
+        <div class="field"><label class="label" for="apass">Passwort</label><input type="password" id="apass" autocomplete="${signup ? "new-password" : "current-password"}" minlength="8" required></div>
         <button class="primary" type="submit" id="authBtn">${signup ? "Konto erstellen" : "Anmelden"}</button>
         ${signup ? "" : `<button type="button" class="ghost" id="forgot">Passwort vergessen?</button>`}
       </form>
@@ -386,7 +412,7 @@ function renderLogin(app) {
       st("err", /invalid login/i.test(m) ? "E-Mail oder Passwort stimmt nicht."
         : /already registered/i.test(m) ? "Mit dieser E-Mail gibt es schon ein Konto. Melde dich an."
         : /not confirmed/i.test(m) ? "Bestätige zuerst deine E-Mail-Adresse. Schau in deinem Posteingang nach."
-        : /password/i.test(m) ? "Das Passwort braucht mindestens 6 Zeichen."
+        : /password/i.test(m) ? "Das Passwort braucht mindestens 8 Zeichen."
         : navigator.onLine ? "Das hat nicht geklappt. Versuche es nochmals." : "Zum Anmelden braucht es Internet.");
       btn.disabled = false;
     }
@@ -396,17 +422,17 @@ function renderRecover(app) {
   app.innerHTML = `<section class="sheet login">
     <h2>Neues Passwort</h2>
     <form id="recForm" class="stack">
-      <div class="field"><label class="label" for="npass">Neues Passwort</label><input type="password" id="npass" autocomplete="new-password" minlength="6" required></div>
+      <div class="field"><label class="label" for="npass">Neues Passwort</label><input type="password" id="npass" autocomplete="new-password" minlength="8" required></div>
       <button class="primary" type="submit">Passwort speichern</button>
     </form><div id="recStatus"></div></section>`;
   $("#recForm").onsubmit = async e => {
     e.preventDefault();
     const { error } = await sb.auth.updateUser({ password: $("#npass").value });
-    $("#recStatus").innerHTML = error ? `<div class="status err">Das hat nicht geklappt. Wähle ein Passwort mit mindestens 6 Zeichen.</div>` : "";
+    $("#recStatus").innerHTML = error ? `<div class="status err">Das hat nicht geklappt. Wähle ein Passwort mit mindestens 8 Zeichen.</div>` : "";
     if (!error) { toast("<strong>Passwort geändert</strong>"); go({ name: "home" }); }
   };
 }
-const userFrom = u => ({ id: u.id, email: u.email, name: u.user_metadata?.name || (u.email || "").split("@")[0] });
+const userFrom = u => ({ id: u.id, email: u.email, name: str(u.user_metadata?.name, 30) || (u.email || "").split("@")[0].slice(0, 30) });
 
 /* ---------- Startseite ---------- */
 function renderHome(app) {
@@ -464,9 +490,9 @@ function renderHome(app) {
           </div>
           <div class="list-points small"><span class="inline-stat">${STAR()} <b>${l.points || 0}</b>&nbsp;Punkte in diesem Voci-Satz</span>${l.best ? `<span class="muted">Rekord pro Runde: <b>${l.best}</b></span>` : ""}</div>
           <div class="row">
-            <button class="primary" data-learn="${l.id}" ${n < 2 ? "disabled" : ""}>Lernen</button>
-            ${l.words.some(w => w.ko > w.ok) ? `<button data-learn-hard="${l.id}">Nur schwierige</button>` : ""}
-            ${l.example ? "" : `<button class="ghost" data-edit="${l.id}">Bearbeiten</button>`}
+            <button class="primary" data-learn="${esc(l.id)}" ${n < 2 ? "disabled" : ""}>Lernen</button>
+            ${l.words.some(w => w.ko > w.ok) ? `<button data-learn-hard="${esc(l.id)}">Nur schwierige</button>` : ""}
+            ${l.example ? "" : `<button class="ghost" data-edit="${esc(l.id)}">Bearbeiten</button>`}
           </div>
         </article>`;
       }).join("")}
@@ -548,8 +574,9 @@ function renderSettings(app) {
   $("#importFile").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     try {
+      if (f.size > 5e6) throw new Error("zu gross");
       const data = JSON.parse(await f.text());
-      const incoming = (data.lists || []).filter(l => l && l.id && Array.isArray(l.words));
+      const incoming = normalizeLists(data?.lists).filter(l => l.id !== EXAMPLE.id);
       if (!incoming.length) throw new Error();
       for (const l of incoming) { const i = lists.findIndex(x => x.id === l.id); if (i >= 0) lists[i] = l; else lists.push(l); persistList(l); }
       $("#backupStatus").innerHTML = `<div class="status ok">${incoming.length} Listen geladen.</div>`;
@@ -570,7 +597,7 @@ function renderEdit(app, keepStatus) {
       <h2>${view.isNew ? "Neue Voci-Liste" : "Liste bearbeiten"}</h2>
       <div class="row">
         <div class="field"><label class="label" for="lname">Name der Liste</label>
-          <input type="text" id="lname" placeholder="z. B. Englisch Unit 4" value="${esc(L.name)}"></div>
+          <input type="text" id="lname" placeholder="z. B. Englisch Unit 4" maxlength="${MAX_NAME}" value="${esc(L.name)}"></div>
         <div class="field"><label class="label" for="llang">Fremdsprache</label>
           <select id="llang">
             ${useClaude ? `<option value="" ${!L.lang ? "selected" : ""}>Automatisch erkennen</option>` : ""}
@@ -595,8 +622,8 @@ function renderEdit(app, keepStatus) {
       <div class="pair-head"><span class="label">Deutsch</span><span class="label" id="fxHead">${esc(L.lang ? langName(L.lang) : "Fremdsprache")}</span><span></span></div>
       <div class="pairs" id="pairs">
         ${L.words.map((w, i) => `<div class="pair${view.newFrom != null && i >= view.newFrom ? " new" : ""}">
-          <input type="text" aria-label="Deutsch ${i + 1}" id="d${i}" data-i="${i}" data-k="d" value="${esc(w.d)}">
-          <input type="text" aria-label="Fremdwort ${i + 1}" id="f${i}" data-i="${i}" data-k="f" value="${esc(w.f)}">
+          <input type="text" aria-label="Deutsch ${i + 1}" id="d${i}" data-i="${i}" data-k="d" maxlength="${MAX_TEXT}" value="${esc(w.d)}">
+          <input type="text" aria-label="Fremdwort ${i + 1}" id="f${i}" data-i="${i}" data-k="f" maxlength="${MAX_TEXT}" value="${esc(w.f)}">
           <button aria-label="Wort entfernen" data-del="${i}">✕</button></div>`).join("")}
       </div>
       ${L.words.length ? `<button class="ghost" id="swapAll" style="align-self:flex-start">Spalten tauschen</button>` : `<p class="muted small">Noch keine Wörter. Scanne ein Foto oder tippe sie ein.</p>`}
@@ -692,7 +719,7 @@ const blobToBase64 = b => new Promise((res, rej) => {
   r.readAsDataURL(b);
 });
 const loadScript = src => new Promise((res, rej) => {
-  if ([...document.scripts].some(s => s.src === src)) return res();
+  if ([...document.scripts].some(s => s.src === new URL(src, location.href).href)) return res();
   const s = document.createElement("script");
   s.src = src; s.onload = res; s.onerror = () => rej(new Error("load"));
   document.head.appendChild(s);
@@ -715,6 +742,8 @@ async function scanOnDevice() {
       if (ocrWorker) await ocrWorker.terminate();
       setStatus("info", `<span class="spinner"></span> Lade die Texterkennung (nur beim ersten Mal) …`);
       ocrWorker = await Tesseract.createWorker(langs, 1, {
+        workerPath: new URL("vendor/tesseract-worker.min.js", location.href).href,
+        corePath: new URL("vendor/tesseract-core", location.href).href, workerBlobURL: false,
         logger: m => { if (m.status === "recognizing text") progress(Math.round(((current + m.progress) / total) * 100)); }
       });
       await ocrWorker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1", user_defined_dpi: "300" });

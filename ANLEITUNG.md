@@ -105,4 +105,30 @@ Wenn die App ein Fremdwort vorliest, zeigt sie es in Silben getrennt an, zum Bei
 
 ## Eine neue Version hochladen
 
-Wenn du Dateien änderst, erhöhe in `sw.js` die Zeile `const VERSION = "voci-heft-v2";` (zum Beispiel auf `v3`). Lade die Änderung danach auf GitHub hoch, GitHub Pages veröffentlicht sie automatisch. Die Geräte laden die neue Version beim nächsten Öffnen.
+Lade die Änderung auf GitHub hoch. GitHub Actions baut die App und veröffentlicht sie automatisch (Workflow „Veröffentlichen“). Die Geräte laden die neue Version beim nächsten Öffnen.
+
+Zum Ausprobieren auf dem eigenen Computer: `npm ci` und danach `npm run build`. Die fertige App liegt dann im Ordner `dist`.
+
+## Automatische Updates
+
+Die Bibliotheken (Supabase, Texterkennung, Silben, Claude) kommen nicht von fremden Servern, sondern werden beim Bauen in die App gepackt.
+
+- **Dependabot** prüft jede Woche, ob es neue Versionen gibt, und öffnet dafür einen Pull Request. Sicherheitslücken meldet es sofort.
+- Der Workflow **„Updates übernehmen“** baut die App mit der neuen Version. Klappt das, übernimmt er das Update und veröffentlicht die App.
+- **Grosse Versionssprünge** (zum Beispiel von 2.x auf 3.x) können die App verändern. Diese Pull Requests bleiben offen, bis du sie geprüft und auf „Merge“ geklickt hast.
+
+## Sicherheit
+
+Die App selbst ist abgesichert:
+
+- Alle Wörter, Namen und Sicherungsdateien werden geprüft und vor der Anzeige unschädlich gemacht.
+- Eine Content Security Policy erlaubt nur Programmcode von der eigenen Seite.
+- Die Datenbank lässt jedes Konto nur an seine eigenen Daten und begrenzt deren Grösse.
+- GitHub prüft den Code mit CodeQL und sucht nach versehentlich hochgeladenen Schlüsseln.
+
+Stelle in Supabase zusätzlich Folgendes ein:
+
+1. **Authentication → Sign In / Providers → Email:** „Confirm email“ eingeschaltet lassen. Weil die App öffentlich ist, kann sich sonst jede Person mit einer erfundenen Adresse ein Konto machen.
+2. **Authentication → Sign In / Providers → Email:** Bei **Minimum password length** mindestens `8` eintragen. Falls verfügbar, auch **Leaked password protection** einschalten.
+3. Wenn nur eure Familie die App benutzen soll: Erstelle die Konten selbst unter **Authentication → Users → Add user** und schalte danach unter **Sign In / Providers** die Option **Allow new users to sign up** aus.
+4. Führe `datenbank.sql` nach jedem Update dieser Datei nochmals aus.
