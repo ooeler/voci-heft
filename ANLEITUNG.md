@@ -1,0 +1,106 @@
+# Voci-Heft einrichten
+
+Das Voci-Heft ist eine Web-App. Sie läuft im Browser und lässt sich auf Handy und Tablet wie eine normale App installieren. Damit sich jedes Kind mit einem eigenen Konto einloggen kann, braucht es eine kleine Datenbank bei **Supabase**. Für eine Familie oder eine Schulklasse ist das gratis.
+
+Die Einrichtung dauert etwa 20 Minuten.
+
+---
+
+## 1. Supabase-Projekt erstellen
+
+1. Gehe auf <https://supabase.com> und erstelle ein kostenloses Konto.
+2. Klicke auf **New project**.
+   - Name: zum Beispiel `voci-heft`
+   - Datenbank-Passwort: Wähle ein sicheres Passwort und bewahre es gut auf.
+   - Region: **Central EU (Zurich)**, falls verfügbar, sonst **Central EU (Frankfurt)**
+3. Warte etwa eine Minute, bis das Projekt bereit ist.
+
+## 2. Tabellen anlegen
+
+1. Öffne im Projekt links den **SQL Editor**.
+2. Kopiere den ganzen Inhalt der Datei `datenbank.sql` hinein.
+3. Klicke auf **Run**. Die Meldung „Success“ erscheint.
+
+Damit gibt es zwei Tabellen, eine für die Listen und eine für Punkte und Abzeichen. Die Regeln darin sorgen dafür, dass jedes Konto **nur seine eigenen Daten** sehen und ändern kann.
+
+## 3. Anmeldung einstellen
+
+Unter **Authentication**:
+
+- **Sign In / Providers → Email**: Ist „Confirm email“ eingeschaltet, muss jedes neue Konto zuerst einen Link in einer E-Mail anklicken. Für jüngere Kinder kannst du das ausschalten, dann geht die Anmeldung sofort.
+- **URL Configuration → Site URL**: Trage hier später die Adresse deiner App ein (siehe Schritt 5), zum Beispiel `https://voci-heft.netlify.app`. Diese Adresse brauchen die Links in den E-Mails, etwa zum Zurücksetzen des Passworts.
+
+**Tipp für Kinder ohne eigene E-Mail-Adresse:** Viele Mail-Dienste (Proton, Gmail, Outlook) leiten Adressen mit einem Pluszeichen weiter. `eltern+mia@proton.me` und `eltern+leo@proton.me` landen beide im Postfach der Eltern, gelten aber als zwei getrennte Konten.
+
+## 4. App mit Supabase verbinden
+
+1. Öffne in Supabase **Project Settings → API** (oder **Data API**).
+2. Kopiere die **Project URL** und den **anon public**-Schlüssel (manchmal heisst er „publishable key“).
+3. Öffne die Datei `config.js` und trage beides ein:
+
+```js
+window.VOCI_CONFIG = {
+  supabaseUrl: "https://abcdefghijkl.supabase.co",
+  supabaseAnonKey: "eyJhbGciOi..."
+};
+```
+
+Dieser Schlüssel darf öffentlich sein. Den **service_role**-Schlüssel darfst du dagegen nie in die App schreiben.
+
+## 5. App ins Internet stellen
+
+Am einfachsten geht es mit **Netlify Drop**, ohne eigenes Konto auf einem Server:
+
+1. Gehe auf <https://app.netlify.com/drop>.
+2. Ziehe den ganzen Ordner `voci-web` in das Feld.
+3. Netlify zeigt eine Adresse wie `https://zufallsname.netlify.app`. Unter „Site settings“ kannst du einen schöneren Namen wählen.
+4. Trage diese Adresse in Supabase als **Site URL** ein (Schritt 3).
+
+Andere Möglichkeiten sind GitHub Pages und Cloudflare Pages. Wichtig ist nur, dass die Adresse mit `https://` beginnt. Sonst funktionieren das Installieren und der Offline-Modus nicht.
+
+## 6. Auf dem Handy oder Tablet installieren
+
+- **Android (Chrome):** Öffne die Adresse und tippe in der App auf „App installieren“ oder im Menü auf „Zum Startbildschirm hinzufügen“.
+- **iPhone/iPad (Safari):** Öffne die Adresse, tippe auf **Teilen** und dann auf **Zum Home-Bildschirm**.
+
+Danach startet das Voci-Heft wie eine normale App. Bereits geladene Listen lassen sich auch ohne Internet lernen. Sobald wieder eine Verbindung besteht, werden die Punkte synchronisiert.
+
+## 7. Optional: Bessere Foto-Erkennung mit Claude
+
+Für gedruckte Voci-Listen (Lehrmittel, Arbeitsblätter) brauchst du das nicht. Die App liest sie direkt auf dem Gerät, gratis und ohne dass Fotos das Gerät verlassen. Sie erkennt zwei Spalten (Fremdsprache und Deutsch) und überspringt eine Spalte mit Lautschrift wie `[ˈkɪtʃɪn]`. Beim ersten Scan lädt sie die Texterkennung herunter (etwa 10 MB), danach geht es schnell.
+
+Nur wenn die Erkennung bei euren Blättern oft danebenliegt, lohnt sich Claude:
+
+1. Erstelle auf <https://console.anthropic.com> ein Konto, lade etwas Guthaben auf (zum Beispiel 5 Dollar) und erstelle einen **API Key**.
+2. Trage den Schlüssel in der App unter **Einstellungen → Fotos auslesen** ein.
+
+Ein Scan kostet etwa 2 bis 5 Rappen. Der Schlüssel wird nur auf diesem Gerät gespeichert. Gib ihn nur auf Geräten ein, denen du vertraust, denn wer das Gerät benutzt, kann damit scannen.
+
+---
+
+## Wörter nach dem Scan korrigieren
+
+Nach dem Scan springt die App zur Wortliste. Die neu erkannten Wörter sind gelb markiert. Tippe in ein Feld, um ein Wort zu korrigieren, lösche falsche Zeilen mit ✕ oder ergänze fehlende mit „+ Wort hinzufügen“. Erst „Liste speichern“ übernimmt alles. Später kannst du jede Liste über „Bearbeiten“ wieder ändern, auch direkt nach einer Lernrunde.
+
+## Silben beim Vorlesen
+
+Wenn die App ein Fremdwort vorliest, zeigt sie es in Silben getrennt an, zum Beispiel „la fe·nê·tre“ oder „de·li·cious“. Die gerade gesprochene Silbe leuchtet gelb auf. Die Silben werden automatisch bestimmt. Bei unregelmässigen Wörtern, besonders im Englischen, stimmt die Trennung nicht immer genau.
+
+## Wie funktioniert die Motivation?
+
+| Was | Wie viel |
+|---|---|
+| Richtig beim ersten Versuch, Modus „Wähle ein Wort“ | 10 Punkte |
+| Richtig beim ersten Versuch, Modus „Schreibe das Wort“ | 15 Punkte |
+| Richtig nach einem Fehler (das Wort kam in dieser Runde schon) | 0 Punkte |
+| Alle 5 richtig hintereinander | 10 Bonuspunkte |
+| Ganze Runde ohne Fehler | 20 Bonuspunkte |
+
+- **Pro Runde zählt jedes Wort nur einmal.** Wer ein Wort falsch hat, übt es in der gleichen Runde nochmals, bekommt dafür aber keine Punkte mehr.
+- **Levels:** Level 2 gibt es ab 100 Punkten, Level 3 ab 300, Level 4 ab 600 und so weiter. Jedes Level hat einen eigenen Namen, vom „Wörtli-Entdecker“ bis zur „Sprach-Legende“.
+- **Sterne pro Liste:** 1 Stern, wenn ein Drittel der Wörter sitzt, 2 Sterne bei zwei Dritteln, 3 Sterne, wenn alle Wörter sitzen.
+- **Abzeichen:** 11 Auszeichnungen, zum Beispiel „Fehlerlos“ oder „Zehnerkette“.
+
+## Eine neue Version hochladen
+
+Wenn du Dateien änderst, erhöhe in `sw.js` die Zeile `const VERSION = "voci-heft-v1";` (zum Beispiel auf `v2`). Ziehe danach den Ordner wieder in Netlify Drop. Die Geräte laden die neue Version beim nächsten Öffnen.
