@@ -128,6 +128,29 @@ Die Bibliotheken (Supabase, Texterkennung, Silben, Claude) kommen nicht von frem
 - Der Workflow **„Updates übernehmen“** baut die App mit der neuen Version. Klappt das, übernimmt er das Update und veröffentlicht die App.
 - **Grosse Versionssprünge** (zum Beispiel von 2.x auf 3.x) können die App verändern. Diese Pull Requests bleiben offen, bis du sie geprüft und auf „Merge“ geklickt hast.
 
+## Automatischer Test bei jedem Pull Request
+
+Bei jedem Pull Request prüft der Tester `voci-tester` die App wie ein kritischer Benutzer. Er bedient sie im Browser und kennt nur die Use Cases in `qa/use-cases.md`. Den Bericht schreibt er als Kommentar in den Pull Request.
+
+- **Kein Zugriff auf den Code:** Der Job holt den Code nicht, der Tester hat nur Browser-Werkzeuge, und der Testserver sperrt das direkte Öffnen von Dateien.
+- **Keine echten Daten:** Der Test läuft ohne die echte `config.js`. Er erreicht deine Supabase-Datenbank nicht und legt keine Konten an.
+- **Blocker halten auf:** Ein Befund der Stufe `blocker` lässt den Check scheitern, und Dependabot-Updates werden dann nicht übernommen. Andere Befunde stehen nur im Kommentar.
+- **Kosten:** Der Test braucht einen eigenen Claude-API-Schlüssel und kostet pro Durchgang höchstens 3 Dollar. Die Grenze steht in `qa/test.sh` (`TESTER_BUDGET_USD`).
+
+Der Schlüssel muss zweimal hinterlegt sein: einmal für normale Pull Requests und einmal für Dependabot.
+
+```bash
+gh secret set ANTHROPIC_API_KEY --repo ooeler/voci-heft
+```
+
+```bash
+gh secret set ANTHROPIC_API_KEY --repo ooeler/voci-heft --app dependabot
+```
+
+Ohne Schlüssel wird der Test mit einer Warnung übersprungen, und Updates werden wie bisher nach dem Build übernommen. Pull Requests aus fremden Forks werden aus Sicherheitsgründen nicht getestet.
+
+Wenn du neue Funktionen baust, ergänze sie in `qa/use-cases.md`. Der Tester prüft nur, was er kennt oder selbst entdeckt.
+
 ## Sicherheit
 
 Die App selbst ist abgesichert:
