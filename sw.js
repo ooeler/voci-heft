@@ -13,6 +13,8 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
+  // Der Wartungsschalter soll immer frisch vom Server kommen, nie aus dem Zwischenspeicher
+  if (url.origin === location.origin && url.pathname.endsWith("/wartung.json")) return;
   // Eigene Dateien: zuerst Netz (damit Änderungen ankommen), sonst Zwischenspeicher
   if (url.origin === location.origin) {
     e.respondWith(fetch(e.request).then(r => {

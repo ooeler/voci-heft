@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { build } from "esbuild";
 
 const OUT = "dist";
-const APP_FILES = ["index.html", "app.js", "style.css", "config.js", "sw.js", "manifest.webmanifest", "icons"];
+const APP_FILES = ["index.html", "app.js", "style.css", "config.js", "sw.js", "manifest.webmanifest", "wartung.json", "icons"];
 const nm = p => "node_modules/" + p;
 
 await rm(OUT, { recursive: true, force: true });
@@ -40,7 +40,8 @@ async function files(dir) {
   return out.sort();
 }
 const hash = createHash("sha256");
-for (const f of await files(OUT)) if (!f.endsWith("/sw.js")) hash.update(f).update(await readFile(f));
+// wartung.json zählt nicht: Ein- und Ausschalten der Wartung ist kein App-Update
+for (const f of await files(OUT)) if (!f.endsWith("/sw.js") && !f.endsWith("/wartung.json")) hash.update(f).update(await readFile(f));
 const version = "voci-heft-" + hash.digest("hex").slice(0, 12);
 const sw = await readFile(OUT + "/sw.js", "utf8");
 if (!/const VERSION = "[^"]*";/.test(sw)) throw new Error("VERSION fehlt in sw.js");

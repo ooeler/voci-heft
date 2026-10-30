@@ -371,7 +371,7 @@ function bindInstall(root) {
 
 /* ---------- Ansichten ---------- */
 let view = { name: "loading" };
-function go(v) { view = v; render(); window.scrollTo({ top: 0 }); }
+function go(v) { view = v; render(); window.scrollTo({ top: 0 }); if (updateReady && !busy()) applyUpdate(); }
 function render() {
   const app = $("#app");
   const top = $("#topActions");
@@ -1205,9 +1205,59 @@ function renderDone(app) {
   $("#home").onclick = () => go({ name: "home" });
 }
 
+/* ---------- Updates und Wartung ---------- */
+const MAINT_ICON = `<svg class="maint-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3.6 17.1a1.5 1.5 0 0 0 2.1 2.1l5.7-5.7a4 4 0 0 0 5.1-5.4l-2.4 2.4-2.1-.6-.6-2.1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+function showMaintenance(title, text, spinner) {
+  let el = $("#maintenance");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "maintenance"; el.setAttribute("role", "alertdialog"); el.setAttribute("aria-modal", "true");
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<div class="sheet maint-card">${spinner ? `<span class="spinner"></span>` : MAINT_ICON}<h2>${esc(title)}</h2><p>${esc(text)}</p></div>`;
+  document.body.classList.add("maint-open");
+}
+function hideMaintenance() { $("#maintenance")?.remove(); document.body.classList.remove("maint-open"); }
+
+// Neue Version: Wartungsseite zeigen und neu laden, aber nie mitten in einer Runde oder beim Bearbeiten.
+let updateReady = false;
+const busy = () => ["quiz", "edit", "recover"].includes(view.name);
+function applyUpdate() {
+  if (busy() || maintActive) { updateReady = true; return; }
+  updateReady = false;
+  showMaintenance("Update wird eingespielt", "Das Voci-Heft bekommt gerade eine neue Version. Einen Moment, gleich geht es weiter.", true);
+  Promise.resolve(flush()).finally(() => setTimeout(() => location.reload(), 1500));
+}
+
+// Wartungsmodus von Hand: in wartung.json "aktiv": true setzen, zum Beispiel bei Änderungen an der Datenbank.
+let maintActive = false;
+async function checkMaintenance() {
+  try {
+    const r = await fetch("wartung.json", { cache: "no-store" });
+    if (!r.ok) return;
+    const w = await r.json();
+    if (w?.aktiv === true) {
+      maintActive = true;
+      showMaintenance("Wartung", str(w.nachricht, 300) || "Das Voci-Heft wird gerade gewartet. Bitte versuche es in ein paar Minuten nochmals.", false);
+    } else if (maintActive) {
+      maintActive = false; hideMaintenance();
+      if (updateReady) applyUpdate();
+    }
+  } catch {}
+}
+checkMaintenance();
+setInterval(() => { if (maintActive || !document.hidden) checkMaintenance(); }, 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkMaintenance(); });
+
 /* ---------- Start ---------- */
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) applyUpdate(); hadController = true; });
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    const check = () => reg.update().catch(() => {});
+    setInterval(check, 30 * 60 * 1000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  }).catch(() => {});
 }
 (async () => {
   if (!sb) { go({ name: "login" }); return; }

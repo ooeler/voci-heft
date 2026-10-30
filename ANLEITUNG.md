@@ -109,6 +109,17 @@ Lade die Änderung auf GitHub hoch. GitHub Actions baut die App und veröffentli
 
 Zum Ausprobieren auf dem eigenen Computer: `npm ci` und danach `npm run build`. Die fertige App liegt dann im Ordner `dist`.
 
+## Wartungsseite
+
+**Bei jedem Update:** Sobald eine neue Version online ist, merkt die App das. Das passiert beim Öffnen, beim Zurückwechseln in die App und sonst alle 30 Minuten. Die App zeigt dann kurz „Update wird eingespielt“ und lädt sich neu. Läuft gerade eine Lernrunde oder wird eine Liste bearbeitet, wartet die App damit, bis das Kind fertig ist. So geht nichts verloren.
+
+**Wartung von Hand**, zum Beispiel wenn du die Datenbank änderst:
+
+1. Öffne auf GitHub die Datei `wartung.json` und klicke auf den Stift.
+2. Setze `"aktiv": true`. Bei `"nachricht"` kannst du einen eigenen Text eintragen.
+3. Klicke auf **Commit changes**. Nach etwa einer Minute zeigen alle offenen Apps die Wartungsseite.
+4. Wenn du fertig bist, setze wieder `"aktiv": false`. Innerhalb einer Minute geht es in der App weiter, auch mitten in einer Lernrunde.
+
 ## Automatische Updates
 
 Die Bibliotheken (Supabase, Texterkennung, Silben, Claude) kommen nicht von fremden Servern, sondern werden beim Bauen in die App gepackt.

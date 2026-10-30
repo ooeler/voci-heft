@@ -240,3 +240,9 @@ input[type=email] { font: inherit; color: var(--ink); background: var(--paper); 
 .install-steps { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
 .install-info[open] summary { margin-bottom: 10px; }
 .install-info p { margin-top: 0; }
+#maintenance { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--paper) 97%, transparent); }
+.maint-card { max-width: 420px; text-align: center; display: grid; justify-items: center; gap: 4px; }
+.maint-card h2 { margin: 8px 0 0; }
+.maint-card p { margin: 4px 0 0; }
+.maint-icon { width: 44px; height: 44px; color: var(--blue); }
+body.maint-open { overflow: hidden; }
