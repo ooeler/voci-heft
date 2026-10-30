@@ -237,3 +237,6 @@ input[type=email] { font: inherit; color: var(--ink); background: var(--paper); 
 .syl.said { color: var(--blue); }
 .dot { color: var(--muted); font-weight: 400; padding: 0 1px; }
 @media (prefers-reduced-motion: reduce) { .syl { transition: none; } }
+.install-steps { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.install-info[open] summary { margin-bottom: 10px; }
+.install-info p { margin-top: 0; }

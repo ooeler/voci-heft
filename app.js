@@ -337,10 +337,37 @@ function sylHTML(text, lang) {
 
 /* ---------- Installieren ---------- */
 let installEvent = null;
-window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvent = e; if (view.name === "home") render(); });
-window.addEventListener("appinstalled", () => { installEvent = null; if (view.name === "home") render(); });
+const INSTALL_VIEWS = ["home", "settings", "login"];
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvent = e; if (INSTALL_VIEWS.includes(view.name)) render(); });
+window.addEventListener("appinstalled", () => { installEvent = null; if (INSTALL_VIEWS.includes(view.name)) render(); });
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isAndroid = () => /android/i.test(navigator.userAgent);
+const isMacSafari = () => /macintosh/i.test(navigator.userAgent) && /safari/i.test(navigator.userAgent) && !/chrome|chromium|edg|firefox/i.test(navigator.userAgent);
+
+// Knopf oder Anleitung, je nachdem, was der Browser kann
+function installHTML() {
+  if (isStandalone()) return `<p>Das Voci-Heft ist als App installiert. Du findest es auf deinem Startbildschirm.</p>`;
+  if (installEvent) return `<p>Mit einem Tipp legst du das Voci-Heft als App auf deinen Startbildschirm. Dann startet es wie jede andere App, auch ohne Internet.</p>
+    <div class="row"><button class="primary" data-install>App installieren</button></div>`;
+  const steps = isIOS()
+    ? ["Tippe unten oder oben auf <b>Teilen</b> (das Viereck mit dem Pfeil nach oben).", "Wähle <b>Zum Home-Bildschirm</b>. Falls du es nicht siehst, scrolle in der Liste nach unten.", "Tippe auf <b>Hinzufügen</b>."]
+    : isAndroid()
+    ? ["Tippe oben rechts auf das Menü <b>⋮</b>.", "Wähle <b>App installieren</b> oder <b>Zum Startbildschirm hinzufügen</b>.", "Bestätige mit <b>Installieren</b> oder <b>Hinzufügen</b>."]
+    : isMacSafari()
+    ? ["Klicke oben im Menü auf <b>Ablage</b>.", "Wähle <b>Zum Dock hinzufügen</b>."]
+    : ["Klicke in der Adresszeile rechts auf das Symbol <b>Installieren</b>.", "Oder öffne das Menü <b>⋮</b> und wähle <b>App installieren</b>."];
+  return `<p>So legst du das Voci-Heft als App auf deinen Startbildschirm. Dann startet es wie jede andere App, auch ohne Internet.</p>
+    <ol class="install-steps">${steps.map(s => `<li>${s}</li>`).join("")}</ol>`;
+}
+function bindInstall(root) {
+  root.querySelectorAll("[data-install]").forEach(b => b.onclick = async () => {
+    if (!installEvent) return;
+    installEvent.prompt();
+    await installEvent.userChoice.catch(() => {});
+    installEvent = null; render();
+  });
+}
 
 /* ---------- Ansichten ---------- */
 let view = { name: "loading" };
@@ -383,7 +410,12 @@ function renderLogin(app) {
       <div class="status info">Die Konten sind noch nicht eingerichtet. Folge der Anleitung in der Datei ANLEITUNG.md und trage die Supabase-Angaben in config.js ein.</div>`}
       <button class="ghost" id="tryLocal">Ohne Konto ausprobieren</button>
       <p class="small muted">Ohne Konto bleiben die Listen nur auf diesem Gerät.</p>
-    </section>`;
+    </section>
+    ${isStandalone() ? "" : `<details class="sheet install-info"${installEvent ? " open" : ""}>
+      <summary>App auf den Startbildschirm</summary>
+      ${installHTML()}
+    </details>`}`;
+  bindInstall(app);
   app.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => go({ name: "login", tab: b.dataset.tab }));
   $("#tryLocal").onclick = () => startSession({ id: "lokal", name: "Gast", local: true });
   const st = (k, h) => $("#authStatus").innerHTML = `<div class="status ${k}">${h}</div>`;
@@ -440,7 +472,7 @@ function renderHome(app) {
   const lvl = levelOf(profile.xp);
   const totalStars = lists.reduce((s, l) => s + listStars(l), 0);
   const earned = BADGES.filter(b => profile.badges[b.id]).length;
-  const showInstall = !isStandalone() && (installEvent || isIOS());
+  const showInstall = !isStandalone() && (installEvent || isIOS() || isAndroid());
   app.innerHTML = `
     <section class="sheet player">
       <div class="avatar" aria-hidden="true">${esc((user.name || "?").slice(0, 1).toUpperCase())}</div>
@@ -456,8 +488,8 @@ function renderHome(app) {
     </section>
     ${showInstall ? `<section class="sheet install-hint">
       <div class="row between">
-        <span>${installEvent ? "Installiere das Voci-Heft auf deinem Startbildschirm." : "Auf dem iPhone oder iPad: Tippe auf Teilen und dann auf „Zum Home-Bildschirm“."}</span>
-        ${installEvent ? `<button class="primary" id="install">App installieren</button>` : ""}
+        <span>Lege das Voci-Heft als App auf deinen Startbildschirm.</span>
+        ${installEvent ? `<button class="primary" data-install>App installieren</button>` : `<button class="primary" id="installHow">So geht's</button>`}
       </div></section>` : ""}
     <section class="sheet">
       <div class="stack">
@@ -503,7 +535,8 @@ function renderHome(app) {
       <div class="badges">${BADGES.map(b => `<div class="badge ${profile.badges[b.id] ? "on" : ""}" title="${esc(b.desc)}">${badgeIcon(b, !!profile.badges[b.id])}<span class="bname">${esc(b.name)}</span><span class="bdesc">${esc(b.desc)}</span></div>`).join("")}</div>
     </section>`;
 
-  $("#install")?.addEventListener("click", async () => { installEvent.prompt(); await installEvent.userChoice.catch(() => {}); installEvent = null; render(); });
+  bindInstall(app);
+  $("#installHow")?.addEventListener("click", () => { go({ name: "settings" }); $("#installInfo")?.scrollIntoView({ block: "start" }); });
   app.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { prefs.mode = b.dataset.mode; savePrefs(); render(); });
   app.querySelectorAll("[data-dir]").forEach(b => b.onclick = () => { prefs.dir = b.dataset.dir; savePrefs(); render(); });
   app.querySelectorAll("[data-learn]").forEach(b => b.onclick = () => startQuiz(b.dataset.learn, false));
@@ -521,6 +554,10 @@ function renderSettings(app) {
       <h2>Mein Konto</h2>
       <p>${user.local ? "Du lernst ohne Konto. Deine Listen bleiben nur auf diesem Gerät." : `Angemeldet als <strong>${esc(user.name)}</strong> (${esc(user.email)}). Deine Listen und Punkte sind auf jedem Gerät da, auf dem du dich anmeldest.`}</p>
       <div class="row"><button id="logout">${user.local ? "Zur Anmeldung" : "Abmelden"}</button></div>
+    </section>
+    <section class="sheet" id="installInfo">
+      <h2>App auf den Startbildschirm</h2>
+      ${installHTML()}
     </section>
     <section class="sheet">
       <h2>Vorlesen und Klänge</h2>
@@ -550,6 +587,7 @@ function renderSettings(app) {
       </div>
       <div id="backupStatus"></div>
     </section>`;
+  bindInstall(app);
   $("#logout").onclick = async () => {
     if (!user.local && sb) { await flush(); await sb.auth.signOut(); }
     user = null; go({ name: "login" });
