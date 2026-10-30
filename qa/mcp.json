@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "node",
+      "args": [
+        "node_modules/@playwright/mcp/cli.js",
+        "--headless",
+        "--isolated",
+        "--browser", "chromium",
+        "--no-sandbox",
+        "--viewport-size", "1280x800",
+        "--allowed-origins", "http://localhost:4173;https://cdn.jsdelivr.net;https://fonts.googleapis.com;https://fonts.gstatic.com",
+        "--output-dir", "bericht"
+      ]
+    }
+  }
+}

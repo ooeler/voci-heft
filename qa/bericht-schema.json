@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["zusammenfassung", "getestet", "befunde", "nicht_getestet"],
+  "properties": {
+    "zusammenfassung": { "type": "string" },
+    "getestet": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["use_case", "ergebnis"],
+        "properties": {
+          "use_case": { "type": "string" },
+          "ergebnis": { "type": "string", "enum": ["ok", "befund", "nicht_getestet"] }
+        }
+      }
+    },
+    "befunde": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schwere", "titel", "use_case", "schritte", "erwartet", "tatsaechlich"],
+        "properties": {
+          "schwere": { "type": "string", "enum": ["blocker", "hoch", "mittel", "tief"] },
+          "titel": { "type": "string" },
+          "use_case": { "type": "string" },
+          "schritte": { "type": "array", "items": { "type": "string" } },
+          "erwartet": { "type": "string" },
+          "tatsaechlich": { "type": "string" },
+          "screenshot": { "type": "string" }
+        }
+      }
+    },
+    "nicht_getestet": { "type": "array", "items": { "type": "string" } }
+  }
+}

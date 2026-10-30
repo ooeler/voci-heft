@@ -1,6 +1,7 @@
-# Prüft Updates von Dependabot und übernimmt sie automatisch, wenn der Build klappt.
+# Prüft jeden Pull Request: Build, danach Black-Box-Test ohne Zugriff auf den Code.
+# Updates von Dependabot werden übernommen, wenn beides klappt.
 # Grosse Versionssprünge (Major) können die App verändern und bleiben zum Prüfen offen.
-name: Updates übernehmen
+name: PR prüfen
 
 on: pull_request
 
@@ -20,9 +21,92 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: dist
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tester
+          path: qa
+          include-hidden-files: true
+          retention-days: 1
+
+  # Dieser Job holt den Code bewusst nicht. Er kennt nur die gebaute App und die Use Cases.
+  # Fremde Forks bekommen keine Geheimnisse, darum läuft er nur für PRs aus diesem Repository.
+  tester:
+    needs: check
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - id: key
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then echo "aktiv=true" >> "$GITHUB_OUTPUT"
+          else echo "::warning::ANTHROPIC_API_KEY fehlt, der Black-Box-Test wird übersprungen."; fi
+      - if: steps.key.outputs.aktiv == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: app
+          path: ${{ runner.temp }}/app
+      - if: steps.key.outputs.aktiv == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: tester
+          path: ${{ runner.temp }}/tester
+      - if: steps.key.outputs.aktiv == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - if: steps.key.outputs.aktiv == 'true'
+        name: Testwerkzeuge installieren
+        working-directory: ${{ runner.temp }}/tester
+        run: |
+          npm ci
+          node_modules/.bin/playwright install --with-deps chromium
+      - if: steps.key.outputs.aktiv == 'true'
+        name: Testserver starten
+        working-directory: ${{ runner.temp }}/tester
+        run: nohup node serve.mjs "$RUNNER_TEMP/app" 4173 > server.log 2>&1 &
+      - if: steps.key.outputs.aktiv == 'true'
+        name: Black-Box-Test
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/tester
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash test.sh
+      - if: steps.key.outputs.aktiv == 'true'
+        id: bericht
+        name: Bericht auswerten
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/tester
+        run: node report.mjs
+      - if: steps.key.outputs.aktiv == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bericht
+          path: ${{ runner.temp }}/tester/bericht
+          retention-days: 14
+      - if: steps.key.outputs.aktiv == 'true'
+        name: Bericht im PR kommentieren
+        working-directory: ${{ runner.temp }}/tester
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file bericht/kommentar.md --edit-last --create-if-none
+      - if: steps.bericht.outcome == 'failure'
+        run: |
+          echo "::error::Der Black-Box-Test hat einen Blocker gefunden oder keinen gültigen Bericht geliefert."
+          exit 1
 
   merge:
-    needs: check
+    needs: [check, tester]
     if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'ooeler/voci-heft'
     runs-on: ubuntu-latest
     permissions:
