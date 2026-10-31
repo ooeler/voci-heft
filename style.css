@@ -30,6 +30,7 @@
   --blue: #7d9cff; --blue-soft: #1f2a4d; --red: #ff7b72; --red-soft: #3a1f22; --green: #4fd08c; --green-soft: #143024;
   --amber: #f0b44c; --amber-soft: #36290f; color-scheme: dark;
 }
+*, *::before, *::after { box-sizing: border-box; }
 html, body { min-height: 100%; }
 body {
   background-color: var(--paper);
@@ -85,7 +86,8 @@ input[type=text], select {
   font: inherit; color: var(--ink); background: var(--paper); border: 1.5px solid var(--line); border-radius: 8px;
   padding: 9px 12px; min-height: 44px; width: 100%; min-width: 0;
 }
-.field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 0; }
+.field { display: flex; flex-direction: column; gap: 4px; flex: none; min-width: 0; }
+.row > .field { flex: 1 1 180px; }
 
 /* Listen */
 .lists { display: flex; flex-direction: column; gap: 12px; }
@@ -107,9 +109,10 @@ input[type=text], select {
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .thumbs img { width: 76px; height: 76px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
 .pairs { display: flex; flex-direction: column; gap: 8px; }
-.pair { display: grid; grid-template-columns: 1fr 1fr 44px; gap: 8px; align-items: center; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 8px; align-items: center; }
 .pair button { padding: 0; min-height: 44px; color: var(--muted); }
-.pair-head { display: grid; grid-template-columns: 1fr 1fr 44px; gap: 8px; }
+.pair-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 8px; }
+@media (max-width: 480px) { .pair input { padding-inline: 8px; } .sheet { padding: 16px; } }
 .status { padding: 10px 14px; border-radius: 8px; font-size: 0.95rem; }
 .status.info { background: var(--blue-soft); color: var(--blue); }
 .status.err { background: var(--red-soft); color: var(--red); }
@@ -150,7 +153,6 @@ input[type=text], select {
 .settings { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
 .settings input[type=range] { accent-color: var(--blue); }
 .voice-pick { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
-.voice-pick .field { flex: none; }
 .voice-row { display: flex; gap: 8px; align-items: center; }
 .voice-row select { flex: 1 1 0; min-width: 0; }
 .voice-row button { flex: none; }

@@ -46,14 +46,14 @@ const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supaba
 let user = null;           // { id, name, email, local }
 let lists = [];
 let profile = null;        // { xp, stats, badges }
-const emptyProfile = () => ({ xp: 0, stats: { correct: 0, sessions: 0, writeSessions: 0, bestCombo: 0, perfect: 0 }, badges: {} });
+const emptyProfile = () => ({ xp: 0, stats: { correct: 0, sessions: 0, writeSessions: 0, bestCombo: 0, perfect: 0, listRounds: {} }, badges: {} });
 const cacheKey = () => "voci-heft-user-" + user.id;
 const saveCache = () => lsSet(cacheKey(), { lists, profile, pending: pending });
 let pending = { lists: [], deleted: [], profile: false };
 
 /* Daten aus Sicherungsdateien, Server und Zwischenspeicher nie ungeprüft übernehmen.
    Die Grenzen entsprechen den Regeln in datenbank.sql. */
-const MAX_WORDS = 1000, MAX_TEXT = 300, MAX_NAME = 120;
+const MAX_WORDS = 1000, MAX_TEXT = 300, MAX_NAME = 120, MAX_ROUND_LISTS = 50;
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const int = (v, max = 1e9) => Math.min(max, Math.max(0, Math.floor(Number(v)) || 0));
 const str = (v, max) => (typeof v === "string" ? v : "").slice(0, max);
@@ -72,7 +72,9 @@ function normalizeProfile(p) {
   const out = emptyProfile();
   if (!p || typeof p !== "object") return out;
   out.xp = int(p.xp);
-  for (const k of Object.keys(out.stats)) out.stats[k] = int(p.stats?.[k]);
+  for (const k of Object.keys(out.stats)) if (k !== "listRounds") out.stats[k] = int(p.stats?.[k]);
+  // Ganze Runden pro Liste. Die neusten zuerst behalten, damit die Grenze in datenbank.sql hält.
+  out.stats.listRounds = Object.fromEntries(Object.entries(p.stats?.listRounds || {}).filter(([id]) => ID_RE.test(id)).slice(-MAX_ROUND_LISTS).map(([id, n]) => [id, int(n, 1e6)]));
   for (const b of BADGES) if (p.badges?.[b.id]) out.badges[b.id] = typeof p.badges[b.id] === "number" ? p.badges[b.id] : true;
   return out;
 }
@@ -138,6 +140,7 @@ function removeList(id) {
   lists = lists.filter(l => l.id !== id);
   pending.lists = pending.lists.filter(x => x !== id);
   pending.deleted.push(id);
+  if (profile.stats.listRounds[id]) { delete profile.stats.listRounds[id]; pending.profile = true; }
   saveCache(); flush();
 }
 function persistProfile() { pending.profile = true; saveCache(); flush(); }
@@ -156,6 +159,12 @@ const listStars = l => { const n = l.words.length; if (!n) return 0; const k = l
 
 const BADGES = [
   { id: "first_session", name: "Erster Schritt", desc: "Die erste Lernrunde geschafft", test: s => s.sessions >= 1 },
+  { id: "rounds10", name: "10 Runden", ini: "10", desc: "10 Lernrunden geschafft", test: s => s.sessions >= 10 },
+  { id: "rounds20", name: "20 Runden", ini: "20", desc: "20 Lernrunden geschafft", test: s => s.sessions >= 20 },
+  { id: "rounds50", name: "50 Runden", ini: "50", desc: "50 Lernrunden geschafft", test: s => s.sessions >= 50 },
+  { id: "rounds100", name: "100 Runden", ini: "100", desc: "100 Lernrunden geschafft", test: s => s.sessions >= 100 },
+  { id: "list5", name: "Dranbleiber", desc: "Eine Liste 5 Mal ganz gelernt", test: (s, c) => c.fiveTimes >= 1 },
+  { id: "list5x3", name: "Dreifach dran", desc: "Drei Listen je 5 Mal ganz gelernt", test: (s, c) => c.fiveTimes >= 3 },
   { id: "first_list", name: "Sammler", desc: "Die erste eigene Liste gespeichert", test: (s, c) => c.lists >= 1 },
   { id: "perfect", name: "Fehlerlos", desc: "Eine ganze Runde ohne Fehler", test: s => s.perfect >= 1 },
   { id: "combo10", name: "Zehnerkette", desc: "10 richtig hintereinander", test: s => s.bestCombo >= 10 },
@@ -168,7 +177,8 @@ const BADGES = [
   { id: "level5", name: "Voci-Profi", desc: "Level 5 erreicht", test: (s, c) => c.level >= 5 }
 ];
 function checkBadges() {
-  const ctx = { lists: lists.length, mastered: lists.filter(l => listStars(l) === 3).length, langs: new Set(lists.map(l => l.lang)).size, level: levelOf(profile.xp) };
+  const ctx = { lists: lists.length, mastered: lists.filter(l => listStars(l) === 3).length, langs: new Set(lists.map(l => l.lang)).size, level: levelOf(profile.xp),
+    fiveTimes: Object.values(profile.stats.listRounds).filter(n => n >= 5).length };
   const fresh = BADGES.filter(b => !profile.badges[b.id] && b.test(profile.stats, ctx));
   for (const b of fresh) profile.badges[b.id] = Date.now();
   return fresh;
@@ -176,7 +186,7 @@ function checkBadges() {
 const badgeIcon = (b, on) => `<svg viewBox="0 0 48 48" class="medal ${on ? "on" : ""}" aria-hidden="true">
   <path d="M15 4h8l-4 14h-8z M33 4h-8l4 14h8z" class="ribbon"/>
   <circle cx="24" cy="29" r="15" class="disc"/><circle cx="24" cy="29" r="11" class="ring"/>
-  <text x="24" y="34" text-anchor="middle" class="ini">${esc(b.name.split(/\s|-/).map(w => w[0]).join("").slice(0, 2))}</text></svg>`;
+  <text x="24" y="34" text-anchor="middle" class="ini">${esc(b.ini || b.name.split(/\s|-/).map(w => w[0]).join("").slice(0, 2))}</text></svg>`;
 
 /* Lob, Klang und Konfetti */
 const PRAISE = ["Super!", "Toll gemacht!", "Genau!", "Bravo!", "Stark!", "Perfekt!", "Läuft bei dir!", "Wow!"];
@@ -1095,7 +1105,7 @@ function renderQuiz(app) {
   } else {
     const acc = toFx ? (ACCENTS[list.lang] || []) : [];
     body = `<form id="wform" class="stack" autocomplete="off">
-      <input type="text" id="answer" class="answer-input" placeholder="${toFx ? esc(langName(list.lang)) + " eintippen" : "Deutsch eintippen"}" autocapitalize="off" spellcheck="false" aria-label="Deine Antwort">
+      <input type="text" id="answer" class="answer-input" placeholder="${toFx ? esc(langName(list.lang)) + " eintippen" : "Deutsch eintippen"}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" ${isAndroid() ? 'inputmode="email"' : ""} aria-label="Deine Antwort">
       ${acc.length ? `<div class="accents">${acc.map(a => `<button type="button" data-acc="${a}">${a}</button>`).join("")}</div>` : ""}
       <button class="primary" type="submit" id="check">Prüfen</button></form>`;
   }
@@ -1211,7 +1221,14 @@ function finishQuiz() {
   if (quiz.mode === "write") s.writeSessions++;
   s.bestCombo = Math.max(s.bestCombo, quiz.bestCombo);
   if (perfect) s.perfect++;
-  quiz.result = { perfect, record: quiz.prevBest > 0 && quiz.xp > quiz.prevBest, levelUp: levelOf(profile.xp) > quiz.startLevel, fresh: checkBadges(), stars: listStars(list) };
+  // Nur ganze Durchgänge zählen, «Nur schwierige» nicht. Neu setzen, damit die Liste in der Reihenfolge ans Ende rückt.
+  let timesDone = 0;
+  if (quiz.total === list.words.length) {
+    timesDone = (s.listRounds[list.id] || 0) + 1;
+    delete s.listRounds[list.id];
+    s.listRounds[list.id] = timesDone;
+  }
+  quiz.result = { perfect, timesDone, record: quiz.prevBest > 0 && quiz.xp > quiz.prevBest, levelUp: levelOf(profile.xp) > quiz.startLevel, fresh: checkBadges(), stars: listStars(list) };
   if (!list.example) persistList(list);
   persistProfile();
   go({ name: "done" });
@@ -1233,6 +1250,7 @@ function renderDone(app) {
         <div><span class="label">Total alle Listen</span><b>${profile.xp}</b><span class="small muted">Level ${lvl}</span></div>
       </div>
       <p class="big-praise">${r.perfect ? "Alles beim ersten Versuch gewusst. Wahnsinn!" : pct >= 75 ? "Sehr gut! Noch ein paar Wörter üben, dann sitzt die Liste." : pct >= 40 ? "Gut gemacht! Jede Runde bringt dich weiter." : "Toll, dass du übst! Die schwierigen Wörter gleich nochmals?"}</p>
+      ${r.timesDone && r.timesDone % 5 === 0 ? `<div class="status ok"><strong>Schon ${r.timesDone} Mal ganz durch diese Liste!</strong> So bleiben die Wörter im Kopf.</div>` : ""}
       <div class="row" style="justify-content:center;gap:18px">
         <span class="inline-stat"><b>${first}/${total}</b>&nbsp;beim ersten Versuch</span>
         <span class="inline-stat"><b>${quiz.bestCombo}</b>&nbsp;längste Serie</span>
