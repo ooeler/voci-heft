@@ -40,7 +40,7 @@ Diese Datei beschreibt, was die App aus Sicht der Benutzer können muss. Alles a
 
 ## E. Einstellungen
 
-- **E1 Vorlesen und Klänge:** Tempo und Klänge lassen sich einstellen und bleiben erhalten.
+- **E1 Vorlesen und Klänge:** Tempo, Stimme und Klänge lassen sich einstellen und bleiben erhalten. Pro Sprache der eigenen Listen gibt es eine Stimmenwahl. Fehlt auf dem Gerät eine Stimme, sagt die App das. In der Testumgebung gibt es vermutlich keine Stimmen.
 - **E2 Claude-Schlüssel:** Ein Schlüssel, der nicht mit `sk-ant-` beginnt, wird mit einer Meldung abgelehnt. Gib nie einen echten Schlüssel ein.
 - **E3 Sicherung:** „Sicherung laden“ lehnt eine Datei ab, die keine Voci-Heft-Sicherung ist, und zeigt eine Meldung.
 
