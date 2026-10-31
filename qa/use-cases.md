@@ -27,6 +27,8 @@ Diese Datei beschreibt, was die App aus Sicht der Benutzer können muss. Alles a
 - **C2 Bonus:** Alle 5 richtigen Antworten hintereinander geben 10 Bonuspunkte. Eine ganze Runde ohne Fehler gibt 20 Bonuspunkte.
 - **C3 Punktestand:** Die Punkte stehen pro Voci-Satz, als Rekord pro Runde und als Total. Der Total steigt nach einer Runde genau um die Punkte dieser Runde.
 - **C4 Level, Sterne, Abzeichen:** Level 2 beginnt bei 100 Punkten, Level 3 bei 300. Eine Liste hat 1 Stern, wenn ein Drittel der Wörter sitzt, 2 Sterne bei zwei Dritteln, 3 bei allen. Neue Abzeichen werden gemeldet und in der Übersicht markiert. Es gibt Abzeichen für 10, 20, 50 und 100 Lernrunden und für Listen, die 5 Mal ganz gelernt wurden. Alle 5 ganzen Durchgänge einer Liste gibt es am Rundenende ein Lob.
+- **C5 Jahreszeiten:** Stempel neben dem Titel, Gruss in der Übersicht und Konfetti passen zur Jahreszeit oder zum Fest. Beim Öffnen der Übersicht rieselt es einmal kurz, ohne Bedienung oder Lesbarkeit zu stören.
+- **C6 Rückkehr:** Nach mindestens 3 Tagen ohne Runde begrüsst die Übersicht freundlich und schlägt eine Liste vor. Nach einer Runde verschwindet die Begrüssung. In der Testumgebung kommt das nicht vor.
 
 ## D. Listen
 
