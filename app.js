@@ -46,7 +46,9 @@ const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supaba
 let user = null;           // { id, name, email, local }
 let lists = [];
 let profile = null;        // { xp, stats, badges }
-const emptyProfile = () => ({ xp: 0, stats: { correct: 0, sessions: 0, writeSessions: 0, bestCombo: 0, perfect: 0, listRounds: {} }, badges: {} });
+const emptyProfile = () => ({ xp: 0, stats: { correct: 0, sessions: 0, writeSessions: 0, bestCombo: 0, perfect: 0, lastDay: 0, listRounds: {} }, badges: {} });
+// Tag seit 1970 in der Zeitzone des Geräts. So zählt eine Runde um Mitternacht zum richtigen Tag.
+const today = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 6e4) / 864e5);
 const cacheKey = () => "voci-heft-user-" + user.id;
 const saveCache = () => lsSet(cacheKey(), { lists, profile, pending: pending });
 let pending = { lists: [], deleted: [], profile: false };
@@ -208,14 +210,53 @@ const sfxRight = () => tone([660, 880]);
 const sfxWrong = () => tone([220, 180], 0.14, "triangle", 0.06);
 const sfxFanfare = () => tone([523, 659, 784, 1047], 0.13, "triangle", 0.09);
 
-function confetti(amount = 140) {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+/* Jahreszeiten: Stempel, Gruss und Farben. shape: bar = Konfetti, round = Schnee und Sonne, leaf = Blätter und Blüten */
+const SEASONS = {
+  halloween: { stamp: "Buuh!", hello: "Gruselig gute Voci-Zeit!", colors: ["#e8711a", "#7a45b5", "#f2b705"], shape: "leaf" },
+  advent: { stamp: "Advent", hello: "Schöne Adventszeit!", colors: ["#9cc3f0", "#c9def7", "#d9a520"], shape: "round" },
+  neujahr: { stamp: "Prosit!", hello: "Viel Erfolg im neuen Jahr!", colors: ["#d9a520", "#c8342b", "#2049c9"], shape: "bar" },
+  winter: { stamp: "Winter", hello: "Warm einpacken und Wörtli lernen!", colors: ["#9cc3f0", "#c9def7", "#7fa8dc"], shape: "round" },
+  ostern: { stamp: "Ostern", hello: "Frohe Ostern!", colors: ["#f2b705", "#7fc97f", "#e58fb1"], shape: "leaf" },
+  fruehling: { stamp: "Frühling", hello: "Der Frühling ist da!", colors: ["#e58fb1", "#f5b8cf", "#7fc97f"], shape: "leaf" },
+  sommer: { stamp: "Sommer", hello: "Schöne Sommerzeit!", colors: ["#f2b705", "#f28c28", "#3fa7d6"], shape: "round" },
+  herbst: { stamp: "Herbst", hello: "Schöne Herbstzeit!", colors: ["#c8642b", "#d9a520", "#a03a1e"], shape: "leaf" }
+};
+function easter(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), n = h + l - 7 * m + 114;
+  return new Date(y, Math.floor(n / 31) - 1, n % 31 + 1);
+}
+function season(now = new Date()) {
+  const days = (now - easter(now.getFullYear())) / 864e5;
+  if (days >= -7 && days < 2) return SEASONS.ostern;
+  const md = (now.getMonth() + 1) * 100 + now.getDate();
+  if (md >= 1024 && md <= 1101) return SEASONS.halloween;
+  if (md >= 1201 && md <= 1226) return SEASONS.advent;
+  if (md >= 1227 || md <= 106) return SEASONS.neujahr;
+  if (md < 301) return SEASONS.winter;
+  if (md < 601) return SEASONS.fruehling;
+  if (md < 901) return SEASONS.sommer;
+  return SEASONS.herbst;
+}
+function effectCanvas() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
   const c = document.createElement("canvas");
   c.className = "confetti"; document.body.appendChild(c);
   const ctx = c.getContext("2d"), dpr = devicePixelRatio || 1;
   c.width = innerWidth * dpr; c.height = innerHeight * dpr; ctx.scale(dpr, dpr);
-  const css = getComputedStyle(document.documentElement);
-  const colors = ["--blue", "--red", "--green", "--amber", "--gold"].map(v => css.getPropertyValue(v).trim() || "#2049c9");
+  return { c, ctx };
+}
+function drawPart(ctx, p, shape) {
+  ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col;
+  if (shape === "bar") ctx.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2);
+  else { ctx.beginPath(); ctx.ellipse(0, 0, p.r / 2, shape === "leaf" ? p.r / 4 : p.r / 2, 0, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+function confetti(amount = 140) {
+  const fx = effectCanvas();
+  if (!fx) return;
+  const { c, ctx } = fx, { colors, shape } = season();
   const parts = Array.from({ length: amount }, () => ({
     x: innerWidth / 2 + (Math.random() - 0.5) * 120, y: innerHeight * 0.35,
     vx: (Math.random() - 0.5) * 12, vy: -Math.random() * 12 - 4, r: Math.random() * 6 + 4,
@@ -226,10 +267,31 @@ function confetti(amount = 140) {
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     for (const p of parts) {
       p.vy += 0.35; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
-      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col;
-      ctx.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2); ctx.restore();
+      drawPart(ctx, p, shape);
     }
     if (t - t0 < 2600) requestAnimationFrame(frame); else c.remove();
+  })(t0);
+}
+// Einmal pro Besuch rieselt es in der Übersicht kurz von oben
+let seasonFallen = false;
+function seasonFall() {
+  if (seasonFallen) return;
+  const fx = effectCanvas();
+  seasonFallen = true;
+  if (!fx) return;
+  const { c, ctx } = fx, { colors, shape } = season(), LIFE = 6000;
+  const parts = Array.from({ length: 36 }, () => ({
+    x0: Math.random() * innerWidth, y0: -Math.random() * innerHeight * 0.4, vy: Math.random() * 0.08 + 0.1,
+    sway: Math.random() * 6, r: Math.random() * 6 + 7, rot0: Math.random() * 6, vr: (Math.random() - 0.5) * 0.002, col: pick(colors)
+  }));
+  const t0 = performance.now();
+  (function frame(t) {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    const ms = t - t0;
+    ctx.globalAlpha = Math.max(0, Math.min(1, (LIFE - ms) / 1500)) * 0.8;
+    // Nach Zeit statt nach Bildern rechnen, damit es auf jedem Bildschirm gleich schnell fällt
+    for (const p of parts) drawPart(ctx, { ...p, x: p.x0 + Math.sin(ms / 700 + p.sway) * 14, y: p.y0 + p.vy * ms, rot: p.rot0 + p.vr * ms }, shape);
+    if (ms < LIFE) requestAnimationFrame(frame); else c.remove();
   })(t0);
 }
 function toast(html, kind = "") {
@@ -446,6 +508,7 @@ function go(v) { stopSpeak(); view = v; render(); window.scrollTo({ top: 0 }); i
 function render() {
   const app = $("#app");
   const top = $("#topActions");
+  $(".stamp").textContent = season().stamp;
   if (!user) top.innerHTML = "";
   else if (view.name === "home") top.innerHTML = `<button class="ghost" id="openSettings">Einstellungen</button><button class="primary" id="newScan">Neue Liste scannen</button>`;
   else top.innerHTML = `<button class="ghost" id="backHome">← Zu den Listen</button>`;
@@ -538,6 +601,20 @@ function renderRecover(app) {
 const userFrom = u => ({ id: u.id, email: u.email, name: str(u.user_metadata?.name, 30) || (u.email || "").split("@")[0].slice(0, 30) });
 
 /* ---------- Startseite ---------- */
+// Nach mindestens 3 Tagen Pause: freundlich begrüssen und die Liste mit den meisten offenen Wörtern vorschlagen
+function comebackHTML() {
+  const away = today() - profile.stats.lastDay;
+  if (!profile.stats.lastDay || away < 3) return "";
+  const open = l => l.words.filter(w => !known(w)).length;
+  const total = lists.reduce((s, l) => s + open(l), 0);
+  const head = away >= 30 ? "Lange nicht gesehen!" : away >= 7 ? "Wir haben dich vermisst!" : "Schön, bist du wieder da!";
+  const best = shownLists().reduce((a, b) => open(b) > open(a) ? b : a);
+  return `<section class="sheet comeback">
+      <h3>${head}</h3>
+      <p>Deine letzte Runde war vor ${away} Tagen. ${total ? `${total === 1 ? "Ein Wort wartet" : `${total} Wörter warten`} noch auf dich.` : "Eine kurze Runde frischt alles wieder auf."}</p>
+      <div class="row"><button class="primary" id="comeback" data-list="${esc(best.id)}">${esc(best.name || "Liste")} lernen</button></div>
+    </section>`;
+}
 function renderHome(app) {
   const ls = shownLists();
   const lvl = levelOf(profile.xp);
@@ -552,11 +629,13 @@ function renderHome(app) {
           <strong class="pname">Hoi ${esc(user.name)}!</strong>
           <span class="chip level">Level ${lvl}</span>
         </div>
+        <span class="small">${season().hello}</span>
         <span class="small muted">${esc(levelName(lvl))} · ${profile.xp} Punkte · noch ${xpNeed(lvl + 1) - profile.xp} bis Level ${lvl + 1}</span>
         <div class="bar xp"><i style="width:${levelPct(profile.xp)}%"></i></div>
         <div class="row small muted" style="gap:14px"><span class="inline-stat">${STAR()} ${totalStars} Sterne</span><span>${earned} von ${BADGES.length} Abzeichen</span></div>
       </div>
     </section>
+    ${comebackHTML()}
     ${showInstall ? `<section class="sheet install-hint">
       <div class="row between">
         <span>Lege das Voci-Heft als App auf deinen Startbildschirm.</span>
@@ -608,6 +687,8 @@ function renderHome(app) {
 
   bindInstall(app);
   $("#installHow")?.addEventListener("click", () => { go({ name: "settings" }); $("#installInfo")?.scrollIntoView({ block: "start" }); });
+  $("#comeback")?.addEventListener("click", e => startQuiz(e.currentTarget.dataset.list, false));
+  seasonFall();
   app.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { prefs.mode = b.dataset.mode; savePrefs(); render(); });
   app.querySelectorAll("[data-dir]").forEach(b => b.onclick = () => { prefs.dir = b.dataset.dir; savePrefs(); render(); });
   app.querySelectorAll("[data-learn]").forEach(b => b.onclick = () => startQuiz(b.dataset.learn, false));
@@ -1221,6 +1302,7 @@ function finishQuiz() {
   if (quiz.mode === "write") s.writeSessions++;
   s.bestCombo = Math.max(s.bestCombo, quiz.bestCombo);
   if (perfect) s.perfect++;
+  s.lastDay = today();
   // Nur ganze Durchgänge zählen, «Nur schwierige» nicht. Neu setzen, damit die Liste in der Reihenfolge ans Ende rückt.
   let timesDone = 0;
   if (quiz.total === list.words.length) {
