@@ -125,8 +125,8 @@ Zum Ausprobieren auf dem eigenen Computer: `npm ci` und danach `npm run build`. 
 Die Bibliotheken (Supabase, Texterkennung, Silben, Claude) kommen nicht von fremden Servern, sondern werden beim Bauen in die App gepackt.
 
 - **Dependabot** prüft jede Woche, ob es neue Versionen gibt, und öffnet dafür einen Pull Request. Sicherheitslücken meldet es sofort.
-- Der Workflow **„Updates übernehmen“** baut die App mit der neuen Version. Klappt das, übernimmt er das Update und veröffentlicht die App.
-- **Grosse Versionssprünge** (zum Beispiel von 2.x auf 3.x) können die App verändern. Diese Pull Requests bleiben offen, bis du sie geprüft und auf „Merge“ geklickt hast.
+- Der Workflow **„PR prüfen“** baut die App mit der neuen Version. Klappt das, übernimmt er das Update und veröffentlicht die App.
+- **Grosse Versionssprünge** (zum Beispiel von 2.x auf 3.x) laufen genauso automatisch durch. Sie können die App verändern, darum fängt nur der Build grobe Fehler ab, solange der Black-Box-Test keinen Schlüssel hat.
 
 ## Automatischer Test bei jedem Pull Request
 
