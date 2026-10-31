@@ -26,7 +26,7 @@ Diese Datei beschreibt, was die App aus Sicht der Benutzer können muss. Alles a
 - **C1 Punkte:** Richtig beim ersten Versuch gibt 10 Punkte beim Wählen und 15 beim Schreiben. Richtig nach einem Fehler gibt 0 Punkte, weil jedes Wort pro Runde nur einmal zählt.
 - **C2 Bonus:** Alle 5 richtigen Antworten hintereinander geben 10 Bonuspunkte. Eine ganze Runde ohne Fehler gibt 20 Bonuspunkte.
 - **C3 Punktestand:** Die Punkte stehen pro Voci-Satz, als Rekord pro Runde und als Total. Der Total steigt nach einer Runde genau um die Punkte dieser Runde.
-- **C4 Level, Sterne, Abzeichen:** Level 2 beginnt bei 100 Punkten, Level 3 bei 300. Eine Liste hat 1 Stern, wenn ein Drittel der Wörter sitzt, 2 Sterne bei zwei Dritteln, 3 bei allen. Neue Abzeichen werden gemeldet und in der Übersicht markiert.
+- **C4 Level, Sterne, Abzeichen:** Level 2 beginnt bei 100 Punkten, Level 3 bei 300. Eine Liste hat 1 Stern, wenn ein Drittel der Wörter sitzt, 2 Sterne bei zwei Dritteln, 3 bei allen. Neue Abzeichen werden gemeldet und in der Übersicht markiert. Es gibt Abzeichen für 10, 20, 50 und 100 Lernrunden und für Listen, die 5 Mal ganz gelernt wurden. Alle 5 ganzen Durchgänge einer Liste gibt es am Rundenende ein Lob.
 
 ## D. Listen
 
