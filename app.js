@@ -35,7 +35,7 @@ const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == n
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* ---------- Geräte-Einstellungen (gelten für alle auf diesem Gerät) ---------- */
-let prefs = Object.assign({ mode: "choose", dir: "de-fx", rate: 0.9, sound: true }, lsGet("voci-heft-prefs", {}));
+let prefs = Object.assign({ mode: "choose", dir: "de-fx", rate: 0.9, sound: true, voices: {} }, lsGet("voci-heft-prefs", {}));
 const savePrefs = () => lsSet("voci-heft-prefs", prefs);
 const getApiKey = () => lsGet("voci-heft-apikey", "");
 const setApiKey = k => { try { k ? lsSet("voci-heft-apikey", k) : localStorage.removeItem("voci-heft-apikey"); } catch {} };
@@ -239,19 +239,70 @@ function celebrateBadges(fresh) {
 /* ---------- Vorlesen ---------- */
 let voices = [];
 function loadVoices() { try { voices = speechSynthesis.getVoices(); } catch {} }
-if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-let sylTimer = null;
+if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = () => { loadVoices(); fillVoices(); }; }
+const speechLang = lang => lang === "la" ? "it-IT" : lang;
+const voiceLang = v => v.lang.replace("_", "-").toLowerCase();
+// Spass-Stimmen von Apple, die beim Lernen nichts verloren haben
+const NOVELTY_VOICE = /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox/;
+// Warm und freundlich klingende Stimmen von Microsoft, Apple und Google. Der Browser verrät den Tonfall nicht.
+const FRIENDLY_VOICE = /sonia|libby|maisie|serena|kate|stephanie|martha|female|denise|eloise|audrey|am[eé]lie|elsa|isabella|alice|federica|elvira|m[oó]nica|paulina|raquel|joana|colette|fenna|ellen|claire/;
+function voiceScore(v, l) {
+  const n = v.name.toLowerCase();
+  let s = voiceLang(v) === l.toLowerCase() ? 1 : 0;
+  if (/natural|neural|premium|enhanced|erweitert/.test(n)) s += 8;
+  if (/siri|google/.test(n)) s += 4;
+  if (FRIENDLY_VOICE.test(n)) s += 3;
+  if (/compact|espeak|novelty/.test(n) || NOVELTY_VOICE.test(n)) s -= 8;
+  return s;
+}
+// Alle Stimmen einer Sprache, die beste zuerst. Ohne Internet fallen die Online-Stimmen weg.
+function voicesFor(l) {
+  const base = l.split("-")[0].toLowerCase();
+  return voices.filter(v => voiceLang(v).split("-")[0] === base && (navigator.onLine || v.localService))
+    .sort((a, b) => voiceScore(b, l) - voiceScore(a, l));
+}
+function pickVoice(l) {
+  const found = voicesFor(l);
+  return found.find(v => v.voiceURI === prefs.voices[l]) || found[0] || null;
+}
+const VOICE_SAMPLE = {
+  "en-GB": "Hello! Nice to meet you. Let's learn some new words together.", "fr-FR": "Bonjour, je peux lire tes mots.", "it-IT": "Ciao, posso leggere le tue parole.",
+  "es-ES": "Hola, puedo leer tus palabras.", "pt-PT": "Olá, posso ler as tuas palavras.", "nl-NL": "Hallo, ik kan je woorden voorlezen."
+};
+const voiceLangs = () => [...new Set(lists.map(x => speechLang(x.lang)).filter(Boolean))].sort().concat(lists.some(x => x.lang) ? [] : ["en-GB"]);
+function fillVoices() {
+  const box = $("#voicePick");
+  if (!box) return;
+  box.innerHTML = voiceLangs().map(l => {
+    const found = voicesFor(l), title = l === "it-IT" && lists.some(x => x.lang === "la") ? "Italienisch und Latein" : langName(l);
+    if (!found.length) return `<div class="status err">Auf diesem Gerät gibt es keine Stimme für ${esc(title)}.</div>`;
+    const chosen = pickVoice(l);
+    return `<div class="field"><label class="label" for="voice-${esc(l)}">Stimme für ${esc(title)}</label>
+      <div class="voice-row"><select id="voice-${esc(l)}" data-voice="${esc(l)}">${found.map(v => `<option value="${esc(v.voiceURI)}" ${v === chosen ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</select>
+      <button class="ghost" data-voice-test="${esc(l)}">Probe hören</button></div></div>`;
+  }).join("");
+  box.querySelectorAll("[data-voice-test]").forEach(b => b.onclick = () => speak(VOICE_SAMPLE[b.dataset.voiceTest], b.dataset.voiceTest));
+  box.querySelectorAll("[data-voice]").forEach(s => s.onchange = () => {
+    prefs.voices = { ...prefs.voices, [s.dataset.voice]: s.value };
+    savePrefs();
+    speak(VOICE_SAMPLE[s.dataset.voice], s.dataset.voice);
+  });
+}
+let sylTimer = null, speakTimer = null, utterance = null;
+const SPEAK_PAUSE = 1200; // Ruhe vor dem automatischen Vorlesen, in Millisekunden
 // Liest das Fremdwort vor. Ist `el` ein Silben-Element (siehe sylHTML), leuchtet die gesprochene Silbe auf.
-function speak(text, lang, el) {
+function speak(text, lang, el, pause = 0) {
   if (!("speechSynthesis" in window) || !text) return;
   const clean = String(text).replace(/\(.*?\)|\[.*?\]/g, "").replace(/\s*\/\s*/g, ", ").trim();
-  const l = lang === "la" ? "it-IT" : lang;
-  const u = new SpeechSynthesisUtterance(clean);
+  const l = speechLang(lang);
+  // Die Referenz bleibt gehalten, sonst räumt Chrome die Äusserung ab und onend kommt nie
+  const u = utterance = new SpeechSynthesisUtterance(clean);
   u.lang = l;
-  const base = l.split("-")[0];
-  u.voice = voices.find(v => v.lang === l) || voices.find(v => v.lang.replace("_", "-").startsWith(base)) || null;
+  u.voice = pickVoice(l);
   u.rate = prefs.rate;
+  u.pitch = 1.05;
   clearInterval(sylTimer);
+  clearTimeout(speakTimer);
   document.querySelectorAll(".syl.now, .syl.said").forEach(s => s.classList.remove("now", "said"));
   const syls = el ? [...el.querySelectorAll(".syl")] : [];
   if (syls.length) {
@@ -266,9 +317,19 @@ function speak(text, lang, el) {
     u.onend = finish;
     u.onerror = finish;
   }
-  speechSynthesis.cancel();
-  speechSynthesis.speak(u);
+  // Direkt nach cancel() verschlucken manche Browser den Anfang, darum kurz warten, falls noch etwas läuft
+  const running = speechSynthesis.speaking || speechSynthesis.pending;
+  if (running) speechSynthesis.cancel();
+  const wait = Math.max(pause, running ? 80 : 0);
+  if (wait) speakTimer = setTimeout(() => speechSynthesis.speak(u), wait);
+  else speechSynthesis.speak(u);
 }
+function stopSpeak() {
+  clearTimeout(speakTimer);
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+// iPhones sprechen verzögert nur, wenn die Sprachausgabe einmal direkt nach einer Berührung gestartet wurde
+if ("speechSynthesis" in window) document.addEventListener("pointerdown", () => speechSynthesis.speak(new SpeechSynthesisUtterance("")), { once: true });
 
 /* ---------- Silbentrennung ---------- */
 const HYPHEN_BASE = "vendor/hyphen/";
@@ -371,7 +432,7 @@ function bindInstall(root) {
 
 /* ---------- Ansichten ---------- */
 let view = { name: "loading" };
-function go(v) { view = v; render(); window.scrollTo({ top: 0 }); if (updateReady && !busy()) applyUpdate(); }
+function go(v) { stopSpeak(); view = v; render(); window.scrollTo({ top: 0 }); if (updateReady && !busy()) applyUpdate(); }
 function render() {
   const app = $("#app");
   const top = $("#topActions");
@@ -380,7 +441,7 @@ function render() {
   else top.innerHTML = `<button class="ghost" id="backHome">← Zu den Listen</button>`;
   $("#newScan")?.addEventListener("click", () => go({ name: "edit", list: { id: uid(), name: "", lang: "", words: [] }, isNew: true }));
   $("#openSettings")?.addEventListener("click", () => go({ name: "settings" }));
-  $("#backHome")?.addEventListener("click", () => { if ("speechSynthesis" in window) speechSynthesis.cancel(); go({ name: "home" }); });
+  $("#backHome")?.addEventListener("click", () => go({ name: "home" }));
   ({ loading: a => a.innerHTML = `<p class="muted" style="text-align:center"><span class="spinner"></span></p>`,
      login: renderLogin, recover: renderRecover, home: renderHome, edit: renderEdit, quiz: renderQuiz, done: renderDone, settings: renderSettings })[view.name](app);
 }
@@ -564,8 +625,9 @@ function renderSettings(app) {
       <div class="settings">
         <label for="rate">Vorlese-Tempo</label>
         <input type="range" id="rate" min="0.6" max="1.2" step="0.05" value="${prefs.rate}">
-        <button class="ghost" id="testVoice">Probe hören</button>
       </div>
+      <div class="voice-pick" id="voicePick"></div>
+      <p class="small muted">Die Stimmen kommen von deinem Gerät. Die App nimmt automatisch die beste und merkt sich hier deine Wahl. Klingt alles blechern, kannst du in den Einstellungen des Geräts bessere Stimmen laden. Am iPhone geht das unter Bedienungshilfen, Gesprochene Inhalte, Stimmen.</p>
       <label class="row" style="gap:8px"><input type="checkbox" id="sound" ${prefs.sound ? "checked" : ""}> Klänge bei richtigen und falschen Antworten</label>
     </section>
     <section class="sheet">
@@ -593,7 +655,7 @@ function renderSettings(app) {
     user = null; go({ name: "login" });
   };
   $("#rate").oninput = e => { prefs.rate = +e.target.value; savePrefs(); };
-  $("#testVoice").onclick = () => speak("Hello! Bonjour! Ciao!", "en-GB");
+  fillVoices();
   $("#sound").onchange = e => { prefs.sound = e.target.checked; savePrefs(); if (prefs.sound) sfxRight(); };
   $("#saveKey").onclick = () => {
     const v = $("#apikey").value.trim();
@@ -1057,7 +1119,7 @@ function renderQuiz(app) {
     </section>
     <p class="small muted" style="text-align:center">${esc(list.name)} · ${quiz.mode === "choose" ? "Wähle ein Wort" : "Schreibe das Wort"}</p>`;
 
-  if (!toFx) { speak(w.f, list.lang, $("#askWord")); $("#sayAsk").onclick = () => speak(w.f, list.lang, $("#askWord")); }
+  if (!toFx) { speak(w.f, list.lang, $("#askWord"), SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.f, list.lang, $("#askWord")); }
   if (quiz.mode === "choose") {
     app.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
       if (quiz.answered) return;
@@ -1109,7 +1171,7 @@ function answer(result) {
     sfxWrong();
   }
   quiz.xp += gained + bonus;
-  setTimeout(() => speak(w.f, list.lang, $("#solWord")), prefs.sound ? 260 : 0);
+  setTimeout(() => speak(w.f, list.lang, $("#solWord"), SPEAK_PAUSE));
 
   const head = ok ? pick(PRAISE) : result === "almost" ? "Fast! Achte auf die Schreibweise." : pick(COMFORT);
   $("#fb").innerHTML = `<div class="feedback ${ok ? "right" : "wrong"}">
@@ -1131,7 +1193,7 @@ function answer(result) {
   $("#nextBtn")?.addEventListener("click", next);
   $("#nextBtn")?.focus();
 }
-function next() { renderQuiz($("#app")); }
+function next() { stopSpeak(); renderQuiz($("#app")); }
 document.addEventListener("keydown", e => {
   if (view.name === "quiz" && quiz?.answered && quiz.mode === "choose" && e.key === "Enter") { e.preventDefault(); next(); }
 });
