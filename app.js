@@ -937,13 +937,12 @@ async function scanOnDevice() {
         corePath: new URL("vendor/tesseract-core", location.href).href, workerBlobURL: false,
         logger: m => { if (m.status === "recognizing text") progress(Math.round(((current + m.progress) / total) * 100)); }
       });
-      await ocrWorker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1", user_defined_dpi: "300" });
+      await ocrWorker.setParameters({ tessedit_pageseg_mode: "4", preserve_interword_spaces: "1", user_defined_dpi: "300" });
       ocrLangs = langs;
     }
     let text = "", rows = [];
     for (const p of view.photos) {
-      const img = await prepareForOcr(p.file);
-      const { data } = await ocrWorker.recognize(img, {}, { text: true, blocks: true });
+      const data = await readPhoto(ocrWorker, p.file);
       text += data.text + "\n";
       rows.push(...rowsFromBlocks(data.blocks));
       current++;
@@ -967,9 +966,9 @@ async function scanOnDevice() {
 }
 const rawBox = t => t.trim() ? `<details style="margin-top:8px"><summary>Erkannten Text anzeigen</summary><textarea class="ocr-raw" readonly>${esc(t.trim())}</textarea></details>` : "";
 
-const GERMAN_HINT = /\b(der|die|das|ein|eine|einen|sich|und|nicht)\b|[äöüß]/i;
+const GERMAN_HINT = /\b(der|die|das|ein|eine|einen|sich|und|nicht)\b|[äöüß]|\p{L}(lich|isch|ig|keit|heit|ung|end)\b/iu;
 const FOREIGN_HINT = {
-  "en-GB": /\b(the|to|a|an|of|is)\b/i,
+  "en-GB": /\b(the|to|a|an|of|is)\b|\p{L}(y|ous|ive|ful|ing|ed|ent|ic)\b/iu,
   "fr-FR": /\b(le|la|les|un|une|des|du|se)\b|\bl'|[éèêàâçôû]/i,
   "it-IT": /\b(il|lo|la|gli|le|un|una|uno|di)\b|\bl'|[àèìòù]/i,
   "es-ES": /\b(el|la|los|las|un|una|de)\b|[áéíóúñ¿¡]/i,
@@ -977,34 +976,123 @@ const FOREIGN_HINT = {
   "nl-NL": /\b(de|het|een|te)\b/i,
   "la": /\b(est|sunt|et)\b|(us|um|ae|is)\b/i
 };
-/* Foto für die Texterkennung aufbereiten: Graustufen und Kontrast strecken, damit Schatten und graues Papier verschwinden */
-async function prepareForOcr(file) {
-  const img = await createImageBitmap(file).catch(() => null);
-  if (!img) return file;
-  const k = Math.min(1, 2400 / Math.max(img.width, img.height));
-  const c = document.createElement("canvas");
-  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+/* Foto für die Texterkennung aufbereiten. Handyfotos sind oft quer, schief und haben harte Schatten. */
+const OCR_SIZE = 3000, ANGLE_SIZE = 1000;
+function grayPixels(ctx, w, h) {
+  const px = ctx.getImageData(0, 0, w, h).data, g = new Uint8Array(w * h);
+  for (let i = 0; i < g.length; i++) g[i] = (px[i * 4] * 299 + px[i * 4 + 1] * 587 + px[i * 4 + 2] * 114) / 1000;
+  return g;
+}
+// Jeder Punkt wird mit seiner Umgebung verglichen. So verschwinden Schatten und Leuchtstift.
+// flat: ausgeglichene Graustufen für die Texterkennung, ink: klar dunkle Punkte
+function evenLight(g, w, h, win) {
+  const sum = new Uint32Array((w + 1) * (h + 1)), ink = new Uint8Array(w * h), flat = new Uint8ClampedArray(w * h), r = win >> 1;
+  for (let y = 0; y < h; y++) {
+    let line = 0;
+    for (let x = 0; x < w; x++) { line += g[y * w + x]; sum[(y + 1) * (w + 1) + x + 1] = sum[y * (w + 1) + x + 1] + line; }
+  }
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+      const mean = (sum[y1 * (w + 1) + x1] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0] + sum[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+      const v = g[y * w + x];
+      if (v < mean * 0.85 && mean - v > 14) ink[y * w + x] = 1;
+      flat[y * w + x] = (v / Math.max(1, mean) - 0.5) * 255 / 0.45;
+    }
+  }
+  return { ink, flat };
+}
+// Sucht den Winkel, bei dem die Zeilen am schärfsten waagrecht liegen. 0 oder 90 Grad plus eine kleine Schieflage.
+function lineAngle(img) {
+  const k = Math.min(1, ANGLE_SIZE / Math.max(img.width, img.height));
+  const w = Math.round(img.width * k), h = Math.round(img.height * k);
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0, c.width, c.height);
-  const id = ctx.getImageData(0, 0, c.width, c.height), px = id.data;
-  const hist = new Uint32Array(256);
-  for (let i = 0; i < px.length; i += 4) {
-    const g = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000 | 0;
-    px[i] = g; hist[g]++;
+  ctx.drawImage(img, 0, 0, w, h);
+  const { ink } = evenLight(grayPixels(ctx, w, h), w, h, 41), pts = [];
+  for (let i = 0; i < ink.length; i++) if (ink[i]) pts.push(i);
+  const step = Math.max(1, Math.floor(pts.length / 30000)), size = w + h + 2;
+  let best = 0, top = -1;
+  for (const base of [0, 90]) for (let a = -8; a <= 8; a += 0.5) {
+    const t = (base + a) * Math.PI / 180, sin = Math.sin(t), cos = Math.cos(t), bins = new Int32Array(size * 2);
+    for (let i = 0; i < pts.length; i += step) bins[Math.round((pts[i] % w) * sin + Math.floor(pts[i] / w) * cos) + size]++;
+    let score = 0;
+    for (let i = 1; i < bins.length; i++) score += (bins[i] - bins[i - 1]) ** 2;
+    if (score > top) { top = score; best = base + a; }
   }
-  // 1 % dunkelste und 5 % hellste Pixel als Schwarz- und Weisspunkt
-  const n = px.length / 4;
-  let lo = 0, hi = 255, acc = 0;
-  while (lo < 255 && (acc += hist[lo]) < n * 0.01) lo++;
-  acc = 0;
-  while (hi > 0 && (acc += hist[hi]) < n * 0.05) hi--;
-  const span = Math.max(1, hi - lo);
-  for (let i = 0; i < px.length; i += 4) {
-    const v = Math.max(0, Math.min(255, (px[i] - lo) * 255 / span));
-    px[i] = px[i + 1] = px[i + 2] = v;
+  return best;
+}
+// Lange Tabellenlinien löschen, sonst liest die Texterkennung sie als Buchstaben oder verschmilzt die Zeilen
+function eraseLines(ink, flat, w, h) {
+  const drop = new Uint8Array(w * h);
+  const sweep = (outer, inner, at, min) => {
+    for (let o = 0; o < outer; o++) {
+      let start = -1, gap = 0;
+      for (let i = 0; i <= inner; i++) {
+        if (i < inner && ink[at(o, i)]) { if (start < 0) start = i; gap = 0; continue; }
+        if (start >= 0 && i < inner && ++gap <= 3) continue;
+        if (start >= 0 && i - gap - start >= min) for (let j = start; j < i; j++) drop[at(o, j)] = 1;
+        start = -1; gap = 0;
+      }
+    }
+  };
+  sweep(h, w, (y, x) => y * w + x, Math.round(w / 20));
+  sweep(w, h, (x, y) => y * w + x, Math.round(h / 20));
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    if (drop[i] || drop[i - w] || drop[i + w] || drop[i - 1] || drop[i + 1]) flat[i] = 255;
   }
-  ctx.putImageData(id, 0, 0);
-  return new Promise(r => c.toBlob(b => r(b || file), "image/png"));
+}
+// Tischplatte und andere unruhige Flächen ausblenden: dort ist viel mehr Schwarz als rund um eine Textzeile
+function eraseNoise(ink, flat, w, h) {
+  const size = Math.round(Math.max(w, h) / 30);
+  for (let y0 = 0; y0 < h; y0 += size) for (let x0 = 0; x0 < w; x0 += size) {
+    const y1 = Math.min(h, y0 + size), x1 = Math.min(w, x0 + size);
+    let n = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) n += ink[y * w + x];
+    if (n <= (x1 - x0) * (y1 - y0) * 0.3) continue;
+    for (let y = y0; y < y1; y++) { ink.fill(0, y * w + x0, y * w + x1); flat.fill(255, y * w + x0, y * w + x1); }
+  }
+}
+function uprightImage(img, angle) {
+  const t = angle * Math.PI / 180, sin = Math.abs(Math.sin(t)), cos = Math.abs(Math.cos(t));
+  const k = Math.min(2, OCR_SIZE / Math.max(img.width, img.height));
+  const w = Math.round((img.width * cos + img.height * sin) * k), h = Math.round((img.width * sin + img.height * cos) * k);
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+  ctx.translate(w / 2, h / 2); ctx.rotate(t); ctx.scale(k, k);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, -img.width / 2, -img.height / 2);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const { ink, flat } = evenLight(grayPixels(ctx, w, h), w, h, Math.round(Math.min(w, h) / 24) | 1);
+  eraseNoise(ink, flat, w, h);
+  eraseLines(ink, flat, w, h);
+  const out = ctx.createImageData(w, h);
+  for (let i = 0; i < flat.length; i++) {
+    out.data[i * 4] = out.data[i * 4 + 1] = out.data[i * 4 + 2] = flat[i];
+    out.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+  return new Promise(r => c.toBlob(r, "image/png"));
+}
+// Punkte für ein Leseergebnis: sicher gelesene Buchstaben. Liegt das Blatt verkehrt, kommt fast nichts zusammen.
+function ocrScore(data) {
+  let n = 0;
+  for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) for (const w of l.words || [])
+    if (w.confidence >= 60 && /\p{L}{2}/u.test(w.text)) n += w.text.length;
+  return n;
+}
+// Liest ein Foto. Wenn die Zeilen liegen, ist noch offen, ob das Blatt richtig herum ist: dann beide Richtungen versuchen.
+async function readPhoto(worker, file) {
+  const img = await createImageBitmap(file).catch(() => null);
+  if (!img) return (await worker.recognize(file, {}, { text: true, blocks: true })).data;
+  const angle = lineAngle(img);
+  const first = (await worker.recognize(await uprightImage(img, angle), {}, { text: true, blocks: true })).data;
+  if (ocrScore(first) >= 150) return first;
+  const second = (await worker.recognize(await uprightImage(img, angle + 180), {}, { text: true, blocks: true })).data;
+  return ocrScore(second) > ocrScore(first) ? second : first;
 }
 
 /* Eine Zeile in Spalten teilen: dort, wo zwischen zwei Wörtern eine grosse Lücke ist */
@@ -1020,16 +1108,23 @@ function rowsFromBlocks(blocks) {
       if (gap > h * 1.3) cells.push([]);
       cells[cells.length - 1].push(words[i]);
     }
-    rows.push(cells.map(ws => ws.map(w => w.text).join(" ")));
+    // Unsicher gelesene Teile weglassen: Das ist fast immer Schatten, Tischplatte oder Bild
+    const sure = cells.filter(ws => ws.reduce((s, w) => s + w.confidence, 0) / ws.length >= 50);
+    rows.push(sure.map(ws => ws.map(w => w.text).join(" ")));
   }
   return rows;
 }
+// Echte Wörter bestehen fast nur aus Buchstaben und haben Selbstlaute
+const wordLike = s => {
+  const letters = (s.match(/\p{L}/gu) || []).length;
+  return letters >= 2 && letters / s.replace(/\s/g, "").length >= 0.75 && /[aeiouyäöüéèêëàâîïôûùáíóúãõ]/i.test(s);
+};
 // Ersatz, falls keine Positionen vorliegen: an Gedankenstrichen, Gleichheitszeichen oder mehreren Leerzeichen teilen
 const textRows = text => text.split(/\r?\n/).map(line => line.split(/\s+[-–—=:]+\s+|\s*=\s*|\t+|\s{3,}|\s+\|\s+/));
 
 const PHONETIC = /^[\[\/(].*[\]\/)]$|[ˈˌəɪʊɒʌæɜɔŋθðʃʒː]/;
 function cleanCell(s) {
-  return s.replace(/^[\s\d.)•·*|-]+(?=\p{L})/u, "")   // Nummerierung und Aufzählungszeichen
+  return s.replace(/^[^\p{L}]+(?=\p{L})/u, "")          // Nummerierung, Aufzählungszeichen und Reste von Linien
           .replace(/\s*\[[^\]]*\]\s*/g, " ")            // Lautschrift wie [dɒg]
           .replace(/\s*\/[^\/\s]*[ˈˌəɪʊɒʌæɜɔŋθðʃʒː][^\/]*\/\s*/g, " ") // Lautschrift wie /dɒg/
           .replace(/[|_]+/g, " ").replace(/\s{2,}/g, " ")
@@ -1038,7 +1133,7 @@ function cleanCell(s) {
 function parsePairs(rows, lang) {
   const raw = [];
   for (const row of rows) {
-    let cells = row.map(cleanCell).filter(c => /\p{L}{2}/u.test(c) && !PHONETIC.test(c));
+    let cells = row.map(cleanCell).filter(c => /\p{L}{2}/u.test(c) && wordLike(c) && !PHONETIC.test(c));
     if (cells.length > 2) {
       // Drei Spalten (z. B. Wort, Lautschrift, Übersetzung oder Wort, Übersetzung, Beispielsatz): Sätze weglassen
       const short = cells.filter(c => c.split(" ").length <= 5);
@@ -1053,7 +1148,14 @@ function parsePairs(rows, lang) {
   const leftIsGerman = raw.reduce((sum, [a, b]) => sum + score(a) - score(b), 0) >= 0;
   // Auf der deutschen Seite gibt es keine französischen Akzente: ô → ö, û → ü, â → ä
   const fixDe = s => s.replace(/ô/g, "ö").replace(/û/g, "ü").replace(/â/g, "ä").replace(/Ô/g, "Ö").replace(/Û/g, "Ü").replace(/Â/g, "Ä");
-  return raw.map(([a, b]) => leftIsGerman ? { de: fixDe(a), fx: b } : { de: fixDe(b), fx: a });
+  // Überlappende Fotos liefern dasselbe Wort mehrmals: pro Fremdwort das Paar mit der längeren Übersetzung behalten
+  const byWord = new Map();
+  for (const [a, b] of raw) {
+    const pair = leftIsGerman ? { de: fixDe(a), fx: b } : { de: fixDe(b), fx: a };
+    const key = pair.fx.toLowerCase().replace(/[^\p{L}]/gu, ""), seen = byWord.get(key);
+    if (!seen || pair.de.length > seen.de.length) byWord.set(key, pair);
+  }
+  return [...byWord.values()];
 }
 
 /* Mit Claude: das Bild direkt verstehen lassen, auch Handschrift */
