@@ -50,12 +50,12 @@ jobs:
           if [ -n "$KEY" ]; then echo "aktiv=true" >> "$GITHUB_OUTPUT"
           else echo "::warning::ANTHROPIC_API_KEY fehlt, der Black-Box-Test wird übersprungen."; fi
       - if: steps.key.outputs.aktiv == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: app
           path: ${{ runner.temp }}/app
       - if: steps.key.outputs.aktiv == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tester
           path: ${{ runner.temp }}/tester
