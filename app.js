@@ -1413,6 +1413,33 @@ function checkTyped(input, target) {
 }
 
 const MODE_NAMES = { choose: "Wähle ein Wort", write: "Schreibe das Wort", dictation: "Diktat" };
+const HINT_WAIT = 3;
+// Erste Schreibweise ohne Zusätze in Klammern, Buchstaben noch nicht gezeigter Stellen als Strich
+const hintWord = sol => String(sol).split(/\s*[\/;,]\s*/)[0].replace(/\(.*?\)/g, "").trim();
+function hintText(sol, n) {
+  let shown = 0;
+  return [...hintWord(sol)].map(c => !/\p{L}/u.test(c) ? c : shown++ < n ? c : "_").join("");
+}
+function bindHint(sol) {
+  const btn = $("#hintBtn"), total = [...hintWord(sol)].filter(c => /\p{L}/u.test(c)).length;
+  let timer = null;
+  btn.onclick = () => {
+    if (quiz.answered || btn.disabled || quiz.hint >= total) return;
+    quiz.hint++;
+    $("#hint").textContent = "Tipp: " + hintText(sol, quiz.hint);
+    $("#answer").focus();
+    if (quiz.hint >= total) { btn.disabled = true; btn.textContent = "Tipp"; return; }
+    let left = HINT_WAIT;
+    btn.disabled = true; btn.textContent = `Tipp (${left})`;
+    clearInterval(timer);
+    timer = setInterval(() => {
+      if (!document.body.contains(btn)) return clearInterval(timer);
+      if (--left > 0) { btn.textContent = `Tipp (${left})`; return; }
+      clearInterval(timer);
+      btn.textContent = "Tipp"; btn.disabled = quiz.answered;
+    }, 1000);
+  };
+}
 function renderQuiz(app) {
   const list = getList(quiz.listId);
   if (!quiz.queue.length) return finishQuiz();
@@ -1420,7 +1447,7 @@ function renderQuiz(app) {
   // Diktat: das Fremdwort nur hören und schreiben
   const dict = quiz.mode === "dictation", toFx = dict || prefs.dir === "de-fx";
   const ask = toFx ? w.d : w.f, sol = toFx ? w.f : w.d;
-  quiz.current = wi; quiz.answered = false;
+  quiz.current = wi; quiz.answered = false; quiz.hint = 0;
   const pct = Math.round(quiz.done / quiz.total * 100);
   let body;
   if (quiz.mode === "choose") {
@@ -1432,7 +1459,11 @@ function renderQuiz(app) {
     body = `<form id="wform" class="stack" autocomplete="off">
       <input type="text" id="answer" class="answer-input" placeholder="${toFx ? esc(langName(list.lang)) + " eintippen" : "Deutsch eintippen"}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" ${isAndroid() ? 'inputmode="email"' : ""} aria-label="Deine Antwort">
       ${acc.length ? `<div class="accents">${acc.map(a => `<button type="button" data-acc="${a}">${a}</button>`).join("")}</div>` : ""}
-      <button class="primary" type="submit" id="check">Prüfen</button></form>`;
+      <p class="hint" id="hint" aria-live="polite"></p>
+      <div class="row" style="justify-content:center">
+        <button type="button" id="hintBtn">Tipp</button>
+        <button class="primary" type="submit" id="check">Prüfen</button>
+      </div></form>`;
   }
   app.innerHTML = `
     <section class="sheet quiz">
@@ -1468,6 +1499,7 @@ function renderQuiz(app) {
   } else {
     const inp = $("#answer");
     setTimeout(() => inp.focus(), 30);
+    bindHint(sol);
     app.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => {
       const s = inp.selectionStart ?? inp.value.length, e = inp.selectionEnd ?? s;
       inp.value = inp.value.slice(0, s) + b.dataset.acc + inp.value.slice(e);
@@ -1481,6 +1513,7 @@ function renderQuiz(app) {
       inp.readOnly = true;
       inp.classList.add(r === "right" ? "right" : "wrong");
       $("#check").textContent = "Weiter";
+      $("#hintBtn").disabled = true;
       answer(r);
     };
   }
@@ -1489,9 +1522,14 @@ function renderQuiz(app) {
 function answer(result) {
   const list = getList(quiz.listId), wi = quiz.current, w = list.words[wi];
   quiz.answered = true;
-  const ok = result === "right";
+  const ok = result === "right", hinted = ok && quiz.hint > 0;
   let gained = 0, bonus = 0;
-  if (ok) {
+  if (hinted) {
+    quiz.combo = 0;
+    quiz.missed.add(wi);
+    quiz.queue.shift(); quiz.queue.unshift(wi);
+    sfxRight();
+  } else if (ok) {
     // Punkte gibt es pro Runde nur einmal pro Wort, und nur wenn es beim ersten Versuch sitzt
     gained = quiz.missed.has(wi) ? 0 : quiz.mode === "choose" ? 10 : 15;
     if (!quiz.missed.has(wi)) quiz.firstTry.add(wi);
@@ -1523,7 +1561,7 @@ function answer(result) {
   const unlockTimer = setTimeout(unlock, SPEAK_PAUSE + 6000 + w.f.length * 150);
   setTimeout(() => speak(w.f, list.lang, $("#solWord"), SPEAK_PAUSE, unlock));
 
-  const head = ok ? pick(PRAISE) : result === "almost" ? "Fast! Achte auf die Schreibweise." : pick(COMFORT);
+  const head = hinted ? "Richtig mit Tipp! Gleich nochmals, diesmal ohne Tipp." : ok ? pick(PRAISE) : result === "almost" ? "Fast! Achte auf die Schreibweise." : pick(COMFORT);
   // Richtig: ein Balken unter den Antworten. Falsch: ein Fenster in der Mitte, damit das richtige Wort im Vordergrund steht.
   const fb = $("#fb");
   fb.classList.toggle("pop", !ok);
@@ -1697,8 +1735,9 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 
 // Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
 const NEWS = {
-  id: "2026-11-09",
+  id: "2026-11-10",
   items: [
+    "Tipp beim Schreiben: Pro Klick kommt ein Buchstabe dazu, danach 3 Sekunden warten. Mit Tipp kommt das Wort gleich nochmals.",
     "Wörterbox: Jedes Wort kommt nach 1, 3, 7, 14 und 30 Tagen wieder. Unter «Heute fällig» siehst du, was dran ist.",
     "Neuer Modus «Diktat»: Du hörst das Wort und schreibst es.",
     "Tages-Serie: Lerne jeden Tag, ein freier Tag pro Woche ist erlaubt.",
