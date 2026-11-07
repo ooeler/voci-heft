@@ -18,6 +18,7 @@ Diese Datei beschreibt, was die App aus Sicht der Benutzer können muss. Alles a
 - **B3 Richtung:** „Deutsch → Fremdsprache“ und „Fremdsprache → Deutsch“ funktionieren beide. Die Einstellung wirkt auf die nächste Runde.
 - **B4 Falsche Wörter kommen wieder:** Ein falsch beantwortetes Wort kommt in derselben Runde nochmals. Die Runde endet erst, wenn alle Wörter einmal richtig waren.
 - **B5 Vorlesen und Silben:** Das richtige Fremdwort wird nach der Antwort vorgelesen und in Silben getrennt angezeigt, zum Beispiel „de·li·cious“ oder „la fe·nê·tre“. In der Testumgebung gibt es vermutlich keinen Ton. Prüfe die Anzeige, nicht den Ton.
+- **B8 Erst hören, dann weiter:** Nach einer Antwort ist «Weiter» gesperrt, bis das Wort vorgelesen ist. Auch Enter springt vorher nicht weiter. Klappt das Vorlesen nicht, wird «Weiter» nach wenigen Sekunden trotzdem frei.
 - **B6 Rundenende:** Am Ende stehen das Resultat, die Punkte dieses Voci-Satzes, der Total und die schwierigen Wörter. Es gibt Knöpfe zum Weiterlernen, zum Bearbeiten der Liste und zurück zur Übersicht.
 - **B7 Nur schwierige:** Gibt es Wörter mit mehr Fehlern als Treffern, erscheint auf der Liste „Nur schwierige“. Diese Runde enthält nur diese Wörter.
 

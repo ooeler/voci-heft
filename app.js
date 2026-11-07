@@ -363,8 +363,9 @@ function fillVoices() {
 let sylTimer = null, speakTimer = null, utterance = null;
 const SPEAK_PAUSE = 1200; // Ruhe vor dem automatischen Vorlesen, in Millisekunden
 // Liest das Fremdwort vor. Ist `el` ein Silben-Element (siehe sylHTML), leuchtet die gesprochene Silbe auf.
-function speak(text, lang, el, pause = 0) {
-  if (!("speechSynthesis" in window) || !text) return;
+// onDone kommt, wenn das Wort fertig gesprochen ist, abgebrochen wurde oder gar nicht gesprochen werden kann.
+function speak(text, lang, el, pause = 0, onDone) {
+  if (!("speechSynthesis" in window) || !text) { onDone?.(); return; }
   const clean = String(text).replace(/\(.*?\)|\[.*?\]/g, "").replace(/\s*\/\s*/g, ", ").trim();
   const l = speechLang(lang);
   // Die Referenz bleibt gehalten, sonst räumt Chrome die Äusserung ab und onend kommt nie
@@ -377,6 +378,7 @@ function speak(text, lang, el, pause = 0) {
   clearTimeout(speakTimer);
   document.querySelectorAll(".syl.now, .syl.said").forEach(s => s.classList.remove("now", "said"));
   const syls = el ? [...el.querySelectorAll(".syl")] : [];
+  let finish = () => {};
   if (syls.length) {
     // Die Sprachausgabe meldet keine Silben, darum schreiten wir im Sprechtempo voran (etwa 4 Silben pro Sekunde)
     let i = 0;
@@ -384,11 +386,10 @@ function speak(text, lang, el, pause = 0) {
       if (i > 0) syls[i - 1].classList.replace("now", "said");
       if (i < syls.length) syls[i++].classList.add("now"); else clearInterval(sylTimer);
     };
-    const finish = () => { clearInterval(sylTimer); syls.forEach(s => { s.classList.remove("now"); s.classList.add("said"); }); setTimeout(() => syls.forEach(s => s.classList.remove("said")), 900); };
+    finish = () => { clearInterval(sylTimer); syls.forEach(s => { s.classList.remove("now"); s.classList.add("said"); }); setTimeout(() => syls.forEach(s => s.classList.remove("said")), 900); };
     u.onstart = () => { step(); sylTimer = setInterval(step, 250 / prefs.rate); };
-    u.onend = finish;
-    u.onerror = finish;
   }
+  u.onend = u.onerror = () => { finish(); onDone?.(); };
   // Direkt nach cancel() verschlucken manche Browser den Anfang, darum kurz warten, falls noch etwas läuft
   const running = speechSynthesis.speaking || speechSynthesis.pending;
   if (running) speechSynthesis.cancel();
@@ -1364,7 +1365,17 @@ function answer(result) {
     sfxWrong();
   }
   quiz.xp += gained + bonus;
-  setTimeout(() => speak(w.f, list.lang, $("#solWord"), SPEAK_PAUSE));
+  // Weiter geht es erst, wenn das Wort vorgelesen ist. Meldet der Browser das Ende nie, gibt eine Zeitgrenze den Knopf frei.
+  quiz.heard = false;
+  const unlock = () => {
+    clearTimeout(unlockTimer);
+    if (quiz.heard || view.name !== "quiz" || quiz.current !== wi || !quiz.answered) return;
+    quiz.heard = true;
+    const btn = $("#nextBtn") || $("#check");
+    if (btn) { btn.disabled = false; btn.focus(); }
+  };
+  const unlockTimer = setTimeout(unlock, SPEAK_PAUSE + 6000 + w.f.length * 150);
+  setTimeout(() => speak(w.f, list.lang, $("#solWord"), SPEAK_PAUSE, unlock));
 
   const head = ok ? pick(PRAISE) : result === "almost" ? "Fast! Achte auf die Schreibweise." : pick(COMFORT);
   $("#fb").innerHTML = `<div class="feedback ${ok ? "right" : "wrong"}">
@@ -1375,18 +1386,21 @@ function answer(result) {
       <div class="row">
         ${gained ? `<span class="gain">+${gained}${bonus ? ` <em>+${bonus} Serie!</em>` : ""}</span>` : ""}
         <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
-        ${quiz.mode === "choose" ? `<button class="primary" id="nextBtn">Weiter</button>` : ""}
+        ${quiz.mode === "choose" ? `<button class="primary" id="nextBtn" disabled>Weiter</button>` : ""}
       </div></div>`;
   $("#hudXp").textContent = quiz.xp;
   const hc = $("#hudCombo");
   hc.textContent = quiz.combo >= 2 ? `${quiz.combo}er-Serie` : "";
   hc.classList.toggle("hot", quiz.combo >= 2);
   if (bonus) { hc.classList.remove("pop"); void hc.offsetWidth; hc.classList.add("pop"); confetti(50); }
-  $("#sayAgain").onclick = () => speak(w.f, list.lang, $("#solWord"));
+  $("#sayAgain").onclick = () => speak(w.f, list.lang, $("#solWord"), 0, unlock);
   $("#nextBtn")?.addEventListener("click", next);
-  $("#nextBtn")?.focus();
+  if ($("#check")) $("#check").disabled = !quiz.heard;
 }
-function next() { stopSpeak(); renderQuiz($("#app")); }
+function next() {
+  if (quiz.answered && !quiz.heard) return;
+  stopSpeak(); renderQuiz($("#app"));
+}
 document.addEventListener("keydown", e => {
   if (view.name === "quiz" && quiz?.answered && quiz.mode === "choose" && e.key === "Enter") { e.preventDefault(); next(); }
 });
