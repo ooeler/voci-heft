@@ -50,7 +50,7 @@ const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supaba
 let user = null;           // { id, name, email, local }
 let lists = [];
 let profile = null;        // { xp, stats, badges }
-const emptyProfile = () => ({ xp: 0, stats: { correct: 0, sessions: 0, writeSessions: 0, bestCombo: 0, perfect: 0, lastDay: 0, listRounds: {} }, badges: {} });
+const emptyProfile = () => ({ xp: 0, stats: { correct: 0, sessions: 0, writeSessions: 0, bestCombo: 0, perfect: 0, lastDay: 0, streak: 0, bestStreak: 0, skipDay: 0, dayBits: 0, listRounds: {} }, badges: {} });
 // Tag seit 1970 in der Zeitzone des Geräts. So zählt eine Runde um Mitternacht zum richtigen Tag.
 const today = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 6e4) / 864e5);
 const cacheKey = () => "voci-heft-user-" + user.id;
@@ -71,7 +71,7 @@ function normalizeList(l) {
     name: str(l.name, MAX_NAME),
     lang: LANGS.some(x => x[0] === l.lang) ? l.lang : "",
     words: l.words.filter(w => w && typeof w === "object").slice(0, MAX_WORDS)
-      .map(w => ({ d: str(w.d, MAX_TEXT), f: str(w.f, MAX_TEXT), ok: int(w.ok, 1e6), ko: int(w.ko, 1e6) })),
+      .map(w => ({ d: str(w.d, MAX_TEXT), f: str(w.f, MAX_TEXT), ok: int(w.ok, 1e6), ko: int(w.ko, 1e6), box: int(w.box, 5), due: int(w.due, 1e6) })),
     points: int(l.points), best: int(l.best)
   };
 }
@@ -169,6 +169,49 @@ const MAX_CHOOSE = 5, MAX_READ = 3;
 const listCount = id => Object.hasOwn(profile.stats.listRounds, id) ? profile.stats.listRounds[id] : [0, 0, 0];
 const chooseLeft = id => Math.max(0, MAX_CHOOSE - listCount(id)[1]);
 const readLeft = id => Math.max(0, MAX_READ - listCount(id)[2]);
+// Wörterbox: richtig beim ersten Versuch bringt das Wort ein Fach weiter, ein Fehler zurück ins erste.
+// Fach 1 bis 5 kommt nach 1, 3, 7, 14 und 30 Tagen wieder. Neue Wörter (Fach 0) sind immer fällig.
+const BOX_DAYS = [0, 1, 3, 7, 14, 30];
+const isDue = w => !w.box || w.due <= today();
+const dueCount = l => l.words.filter(isDue).length;
+// Tages-Serie: Tage in Folge mit mindestens einer Runde. Ein freier Tag pro Woche unterbricht sie nicht.
+const skipAllowed = (s, day) => day - s.skipDay >= 7;
+function streakNow() {
+  const s = profile.stats, gap = today() - s.lastDay;
+  if (!s.lastDay) return 0;
+  return gap <= 1 || (gap === 2 && skipAllowed(s, today() - 1)) ? s.streak : 0;
+}
+function countDay(s) {
+  const d = today(), gap = s.lastDay ? d - s.lastDay : Infinity;
+  if (gap === 1) s.streak++;
+  else if (gap === 2 && skipAllowed(s, d - 1)) { s.streak++; s.skipDay = d - 1; }
+  else if (gap !== 0) s.streak = 1;
+  s.streak = Math.max(1, s.streak);
+  s.bestStreak = Math.max(s.bestStreak, s.streak);
+  // Lerntage der letzten 28 Tage als Bits, Bit 0 ist der letzte Lerntag
+  if (gap > 0) s.dayBits = gap >= 28 ? 0 : (s.dayBits * 2 ** gap) % 2 ** 28;
+  if (s.dayBits % 2 === 0) s.dayBits += 1;
+  s.lastDay = d;
+}
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const speakBackBtn = () => prefs.speakBack && SpeechRec ? `<button class="speak big" id="speakBack" aria-label="Nachsprechen">${MIC}</button>` : "";
+// Nachsprechen: Der Browser erkennt das gesprochene Wort (Chrome über Google, Safari über Apple)
+function speakBack(target, lang, btn) {
+  if ("speechSynthesis" in window && speechSynthesis.speaking) { toast(`<div><strong>Hör zuerst zu.</strong><br><span>Danach kannst du nachsprechen.</span></div>`); return; }
+  const rec = new SpeechRec();
+  rec.lang = speechLang(lang); rec.maxAlternatives = 3; rec.interimResults = false;
+  btn?.classList.add("listening");
+  rec.onresult = e => {
+    const heard = [...e.results[0]].map(a => a.transcript);
+    const good = heard.some(h => variants(target).some(v => lev(norm(h), v) <= Math.max(1, Math.floor(v.length / 6))));
+    toast(good ? `<div><strong>Super ausgesprochen!</strong></div>`
+      : `<div><strong>Fast!</strong><br><span>Ich habe «${esc(heard[0] || "")}» verstanden. Hör nochmals zu und versuch es wieder.</span></div>`, good ? "level" : "");
+  };
+  rec.onerror = e => toast(`<div><strong>${e.error === "not-allowed" || e.error === "service-not-allowed" ? "Bitte erlaube das Mikrofon." : "Ich habe nichts gehört."}</strong><br><span>Tippe nochmals aufs Mikrofon und sprich das Wort deutlich.</span></div>`);
+  rec.onend = () => btn?.classList.remove("listening");
+  try { rec.start(); } catch { btn?.classList.remove("listening"); }
+}
 const listStars = l => { const n = l.words.length; if (!n) return 0; const k = l.words.filter(known).length / n; return k >= 1 ? 3 : k >= 2 / 3 ? 2 : k >= 1 / 3 ? 1 : 0; };
 
 const BADGES = [
@@ -179,6 +222,8 @@ const BADGES = [
   { id: "rounds100", name: "100 Runden", ini: "100", desc: "100 Lernrunden geschafft", test: s => s.sessions >= 100 },
   { id: "list5", name: "Dranbleiber", desc: "Eine Liste 5 Mal ganz gelernt", test: (s, c) => c.fiveTimes >= 1 },
   { id: "list5x3", name: "Dreifach dran", desc: "Drei Listen je 5 Mal ganz gelernt", test: (s, c) => c.fiveTimes >= 3 },
+  { id: "streak7", name: "Wochen-Serie", ini: "7", desc: "7 Tage in Folge gelernt", test: s => s.bestStreak >= 7 },
+  { id: "streak30", name: "Monats-Serie", ini: "30", desc: "30 Tage in Folge gelernt", test: s => s.bestStreak >= 30 },
   { id: "first_list", name: "Sammler", desc: "Die erste eigene Liste gespeichert", test: (s, c) => c.lists >= 1 },
   { id: "perfect", name: "Fehlerlos", desc: "Eine ganze Runde ohne Fehler", test: s => s.perfect >= 1 },
   { id: "combo10", name: "Zehnerkette", desc: "10 richtig hintereinander", test: s => s.bestCombo >= 10 },
@@ -530,7 +575,7 @@ function render() {
   $("#openSettings")?.addEventListener("click", () => go({ name: "settings" }));
   $("#backHome")?.addEventListener("click", () => go({ name: "home" }));
   ({ loading: a => a.innerHTML = `<p class="muted" style="text-align:center"><span class="spinner"></span></p>`,
-     login: renderLogin, recover: renderRecover, home: renderHome, edit: renderEdit, quiz: renderQuiz, done: renderDone, settings: renderSettings })[view.name](app);
+     login: renderLogin, recover: renderRecover, home: renderHome, edit: renderEdit, quiz: renderQuiz, done: renderDone, settings: renderSettings, parents: renderParents })[view.name](app);
 }
 
 /* ---------- Anmelden ---------- */
@@ -646,7 +691,9 @@ function renderHome(app) {
         <span class="small">${season().hello}</span>
         <span class="small muted">${esc(levelName(lvl))} · ${profile.xp} Punkte · noch ${xpNeed(lvl + 1) - profile.xp} bis Level ${lvl + 1}</span>
         <div class="bar xp"><i style="width:${levelPct(profile.xp)}%"></i></div>
-        <div class="row small muted" style="gap:14px"><span class="inline-stat">${STAR()} ${totalStars} Sterne</span><span>${earned} von ${BADGES.length} Abzeichen</span></div>
+        <div class="row small muted" style="gap:14px"><span class="inline-stat">${STAR()} ${totalStars} Sterne</span><span>${earned} von ${BADGES.length} Abzeichen</span><span>${streakNow()} ${streakNow() === 1 ? "Tag" : "Tage"} in Folge</span></div>
+        ${(() => { const n = shownLists().reduce((a, l) => a + dueCount(l), 0); return n ? `<span class="small"><strong>Heute fällig: ${n} ${n === 1 ? "Wort" : "Wörter"}</strong></span>` : `<span class="small">Heute ist nichts fällig. Super!</span>`; })()}
+        <button class="ghost" id="openParents" style="align-self:flex-start;padding-inline:0">Übersicht für Eltern</button>
       </div>
     </section>
     ${comebackHTML()}
@@ -662,6 +709,7 @@ function renderHome(app) {
           <div class="seg" role="group" aria-label="Lernmodus">
             <button data-mode="choose" aria-pressed="${prefs.mode === "choose"}">Wähle ein Wort</button>
             <button data-mode="write" aria-pressed="${prefs.mode === "write"}">Schreibe das Wort</button>
+            ${"speechSynthesis" in window ? `<button data-mode="dictation" aria-pressed="${prefs.mode === "dictation"}">Diktat</button>` : ""}
           </div>
           <div class="seg" role="group" aria-label="Richtung">
             <button data-dir="de-fx" aria-pressed="${prefs.dir === "de-fx"}">Deutsch → Fremdsprache</button>
@@ -689,6 +737,7 @@ function renderHome(app) {
           <div class="list-points small"><span class="inline-stat">${STAR()} <b>${int(l.points)}</b>&nbsp;Punkte in diesem Voci-Satz</span>${l.best ? `<span class="muted">Rekord pro Runde: <b>${int(l.best)}</b></span>` : ""}</div>
           <div class="row">
             <button class="primary" data-learn="${esc(l.id)}" ${n < 2 ? "disabled" : ""}>Lernen</button>
+            ${dueCount(l) && dueCount(l) < n ? `<button data-learn-due="${esc(l.id)}">Fällige üben (${dueCount(l)})</button>` : ""}
             ${l.words.some(w => w.ko > w.ok) ? `<button data-learn-hard="${esc(l.id)}">Nur schwierige</button>` : ""}
             ${l.example ? "" : `<button class="ghost" data-edit="${esc(l.id)}">Bearbeiten</button>`}
           </div>
@@ -714,6 +763,8 @@ function renderHome(app) {
   $("#readAsk").onchange = e => { prefs.readAsk = e.target.checked; savePrefs(); render(); };
   app.querySelectorAll("[data-learn]").forEach(b => b.onclick = () => startQuiz(b.dataset.learn, false));
   app.querySelectorAll("[data-learn-hard]").forEach(b => b.onclick = () => startQuiz(b.dataset.learnHard, true));
+  app.querySelectorAll("[data-learn-due]").forEach(b => b.onclick = () => startQuiz(b.dataset.learnDue, "due"));
+  $("#openParents")?.addEventListener("click", () => go({ name: "parents" }));
   app.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
     go({ name: "edit", list: JSON.parse(JSON.stringify(getList(b.dataset.edit))), isNew: false });
   });
@@ -741,6 +792,8 @@ function renderSettings(app) {
       <div class="voice-pick" id="voicePick"></div>
       <p class="small muted">Die Stimmen kommen von deinem Gerät. Die App nimmt automatisch die beste und merkt sich hier deine Wahl. Klingt alles blechern, kannst du in den Einstellungen des Geräts bessere Stimmen laden. Am iPhone geht das unter Bedienungshilfen, Gesprochene Inhalte, Stimmen.</p>
       <label class="row" style="gap:8px"><input type="checkbox" id="sound" ${prefs.sound ? "checked" : ""}> Klänge bei richtigen und falschen Antworten</label>
+      ${SpeechRec ? `<label class="row" style="gap:8px"><input type="checkbox" id="speakBackOn" ${prefs.speakBack ? "checked" : ""}> Nachsprechen üben (Mikrofon)</label>
+      <p class="small muted">Nach jeder Antwort kann das Kind das Wort ins Mikrofon sprechen. Die Erkennung macht der Browser: Chrome schickt die Aufnahme dafür an Google, Safari an Apple.</p>` : ""}
     </section>
     <section class="sheet">
       <h2>Fotos auslesen</h2>
@@ -769,6 +822,7 @@ function renderSettings(app) {
   $("#rate").oninput = e => { prefs.rate = +e.target.value; savePrefs(); };
   fillVoices();
   $("#sound").onchange = e => { prefs.sound = e.target.checked; savePrefs(); if (prefs.sound) sfxRight(); };
+  $("#speakBackOn")?.addEventListener("change", e => { prefs.speakBack = e.target.checked; savePrefs(); });
   $("#saveKey").onclick = () => {
     const v = $("#apikey").value.trim();
     if (!v) return; // Entfernen geht über den eigenen Knopf
@@ -799,6 +853,61 @@ function renderSettings(app) {
       $("#backupStatus").innerHTML = `<div class="status ok">${incoming.length} Listen geladen.</div>`;
     } catch {
       $("#backupStatus").innerHTML = `<div class="status err">Diese Datei ist keine Voci-Heft-Sicherung.</div>`;
+    }
+  };
+}
+
+/* ---------- Übersicht für Eltern ---------- */
+function renderParents(app) {
+  const s = profile.stats, d = today(), words = lists.flatMap(l => l.words);
+  const safe = words.filter(w => w.box >= 3).length, learning = words.filter(w => w.box > 0 && w.box < 3).length;
+  const fresh = words.filter(w => !w.box).length, due = words.filter(isDue).length;
+  // 28 Tage, ganz rechts heute. Bit i steht für den Tag lastDay - i.
+  const days = Array.from({ length: 28 }, (_, k) => { const i = s.lastDay - (d - 27 + k); return i >= 0 && i < 28 && Math.floor(s.dayBits / 2 ** i) % 2 === 1; });
+  const learned = days.filter(Boolean).length;
+  const hard = l => l.words.filter(w => w.ko > w.ok);
+  const text = [`Voci-Heft: Übersicht für ${user.name}`,
+    `Gelernt an ${learned} von 28 Tagen, Serie ${streakNow()} Tage (beste ${s.bestStreak}), ${s.sessions} Runden, ${s.correct} richtige Antworten.`,
+    `Wörter: ${safe} sicher, ${learning} im Lernen, ${fresh} neu, ${due} heute fällig.`,
+    ...lists.map(l => `${l.name || "Ohne Namen"}: ${listStars(l)} von 3 Sternen, ${listCount(l.id)[0]} Mal ganz gelernt${hard(l).length ? `, schwierig: ${hard(l).slice(0, 8).map(w => w.f).join(", ")}` : ""}`)].join("\n");
+  app.innerHTML = `
+    <section class="sheet">
+      <h2>Übersicht für Eltern</h2>
+      <p class="muted">${esc(user.name)} · Stand ${esc(new Date().toLocaleDateString("de-CH"))}</p>
+      <div class="tally">
+        <div><span class="label">Lerntage</span><b>${learned}</b><span class="small muted">von 28 Tagen</span></div>
+        <div><span class="label">Serie</span><b>${streakNow()}</b><span class="small muted">beste: ${int(s.bestStreak)} ${int(s.bestStreak) === 1 ? "Tag" : "Tage"}</span></div>
+        <div><span class="label">Runden</span><b>${int(s.sessions)}</b><span class="small muted">${int(s.writeSessions)} davon geschrieben</span></div>
+        <div><span class="label">Richtig</span><b>${int(s.correct)}</b><span class="small muted">Antworten</span></div>
+      </div>
+      <div class="days" role="img" aria-label="Gelernt an ${learned} der letzten 28 Tage">${days.map((on, k) => `<i class="${on ? "on" : ""}${k === 27 ? " today" : ""}"></i>`).join("")}</div>
+      <p class="small muted">Jedes Kästchen ist ein Tag, das letzte ist heute. Grün heisst: mindestens eine Runde gelernt.</p>
+    </section>
+    <section class="sheet">
+      <h3>Wörter</h3>
+      <div class="tally">
+        <div><span class="label">Sicher</span><b>${safe}</b><span class="small muted">Fach 3 bis 5</span></div>
+        <div><span class="label">Im Lernen</span><b>${learning}</b><span class="small muted">Fach 1 und 2</span></div>
+        <div><span class="label">Neu</span><b>${fresh}</b><span class="small muted">noch nie richtig</span></div>
+        <div><span class="label">Heute fällig</span><b>${due}</b><span class="small muted">zum Wiederholen</span></div>
+      </div>
+    </section>
+    <section class="sheet">
+      <h3>Listen</h3>
+      ${lists.length ? lists.map(l => `<div class="parent-list">
+        <div class="row between"><strong>${esc(l.name || "Ohne Namen")}</strong><span class="stars" aria-label="${listStars(l)} von 3 Sternen">${STAR(listStars(l) >= 1)}${STAR(listStars(l) >= 2)}${STAR(listStars(l) >= 3)}</span></div>
+        <span class="small muted">${listCount(l.id)[0]} Mal ganz gelernt · ${dueCount(l)} heute fällig</span>
+        ${hard(l).length ? `<span class="small">Schwierig: ${hard(l).slice(0, 8).map(w => `${esc(w.f)} (${esc(w.d)})`).join(", ")}</span>` : `<span class="small muted">Keine schwierigen Wörter.</span>`}
+      </div>`).join("") : `<p class="muted">Noch keine eigenen Listen.</p>`}
+    </section>
+    <div class="row" style="justify-content:center"><button class="primary" id="shareParents">Teilen</button></div>
+    <div id="shareStatus"></div>`;
+  $("#shareParents").onclick = async () => {
+    try {
+      if (navigator.share) await navigator.share({ title: "Voci-Heft", text });
+      else { await navigator.clipboard.writeText(text); $("#shareStatus").innerHTML = `<div class="status ok">Die Übersicht ist kopiert. Du kannst sie in eine Nachricht einfügen.</div>`; }
+    } catch (e) {
+      if (e?.name !== "AbortError") $("#shareStatus").innerHTML = `<div class="status err">Teilen hat nicht geklappt.</div>`;
     }
   };
 }
@@ -1271,14 +1380,16 @@ Lies alle Wortpaare heraus, in der Reihenfolge auf der Seite. "de" ist immer das
 let quiz = null;
 function newQuiz(listId, idx, mode = prefs.mode) {
   if (mode === "choose" && !chooseLeft(listId)) mode = "write";
+  if (mode === "dictation" && !("speechSynthesis" in window)) mode = "write";
   return { listId, queue: shuffle(idx), total: idx.length, done: 0, firstTry: new Set(), missed: new Set(), current: null, answered: false,
-           xp: 0, combo: 0, bestCombo: 0, correct: 0, startLevel: levelOf(profile.xp), mode, readAsk: !!prefs.readAsk && readLeft(listId) > 0 };
+           xp: 0, combo: 0, bestCombo: 0, correct: 0, startLevel: levelOf(profile.xp), mode, readAsk: mode !== "dictation" && !!prefs.readAsk && readLeft(listId) > 0 };
 }
 async function startQuiz(id, hardOnly, mode) {
   const list = getList(id);
   await Promise.race([loadHyphenator(list.lang), new Promise(r => setTimeout(r, 2500))]);
   let idx = list.words.map((_, i) => i);
-  if (hardOnly) idx = idx.filter(i => list.words[i].ko > list.words[i].ok);
+  if (hardOnly === "due") idx = idx.filter(i => isDue(list.words[i]));
+  else if (hardOnly) idx = idx.filter(i => list.words[i].ko > list.words[i].ok);
   if (!idx.length) idx = list.words.map((_, i) => i);
   quiz = newQuiz(id, idx, mode);
   go({ name: "quiz" });
@@ -1301,11 +1412,13 @@ function checkTyped(input, target) {
   return "wrong";
 }
 
+const MODE_NAMES = { choose: "Wähle ein Wort", write: "Schreibe das Wort", dictation: "Diktat" };
 function renderQuiz(app) {
   const list = getList(quiz.listId);
   if (!quiz.queue.length) return finishQuiz();
   const wi = quiz.queue[0], w = list.words[wi];
-  const toFx = prefs.dir === "de-fx";
+  // Diktat: das Fremdwort nur hören und schreiben
+  const dict = quiz.mode === "dictation", toFx = dict || prefs.dir === "de-fx";
   const ask = toFx ? w.d : w.f, sol = toFx ? w.f : w.d;
   quiz.current = wi; quiz.answered = false;
   const pct = Math.round(quiz.done / quiz.total * 100);
@@ -1329,19 +1442,20 @@ function renderQuiz(app) {
         <span class="combo ${quiz.combo >= 2 ? "hot" : ""}" id="hudCombo">${quiz.combo >= 2 ? `${quiz.combo}er-Serie` : ""}</span>
       </div>
       <div class="question">
-        <span class="label">${toFx ? "Deutsch" : esc(langName(list.lang))}</span>
+        <span class="label">${dict ? `Diktat · ${esc(langName(list.lang))}` : toFx ? "Deutsch" : esc(langName(list.lang))}</span>
         <div class="row" style="justify-content:center">
-          <span class="word" id="askWord">${toFx ? esc(ask) : sylHTML(ask, list.lang)}</span>
-          ${toFx && !quiz.readAsk ? "" : `<button class="speak" id="sayAsk" aria-label="Vorlesen">${SPEAKER}</button>`}
+          <span class="word" id="askWord">${dict ? "Hör gut zu" : toFx ? esc(ask) : sylHTML(ask, list.lang)}</span>
+          ${toFx && !quiz.readAsk && !dict ? "" : `<button class="speak" id="sayAsk" aria-label="Vorlesen">${SPEAKER}</button>`}
         </div>
-        <span class="muted small">${quiz.mode === "choose" ? "Wähle die richtige Übersetzung" : "Schreibe die Übersetzung"}</span>
+        <span class="muted small">${quiz.mode === "choose" ? "Wähle die richtige Übersetzung" : dict ? "Schreibe das Wort, das du hörst" : "Schreibe die Übersetzung"}</span>
       </div>
       ${body}
       <div id="fb"></div>
     </section>
-    <p class="small muted" style="text-align:center">${esc(list.name)} · ${quiz.mode === "choose" ? "Wähle ein Wort" : "Schreibe das Wort"}</p>`;
+    <p class="small muted" style="text-align:center">${esc(list.name)} · ${MODE_NAMES[quiz.mode]}</p>`;
 
-  if (!toFx) { speak(w.f, list.lang, $("#askWord"), SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.f, list.lang, $("#askWord")); }
+  if (dict) { speak(w.f, list.lang, null, SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.f, list.lang); }
+  else if (!toFx) { speak(w.f, list.lang, $("#askWord"), SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.f, list.lang, $("#askWord")); }
   else if (quiz.readAsk) { speak(w.d, "de-CH", null, SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.d, "de-CH"); }
   if (quiz.mode === "choose") {
     app.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
@@ -1379,16 +1493,18 @@ function answer(result) {
   let gained = 0, bonus = 0;
   if (ok) {
     // Punkte gibt es pro Runde nur einmal pro Wort, und nur wenn es beim ersten Versuch sitzt
-    gained = quiz.missed.has(wi) ? 0 : quiz.mode === "write" ? 15 : 10;
+    gained = quiz.missed.has(wi) ? 0 : quiz.mode === "choose" ? 10 : 15;
     if (!quiz.missed.has(wi)) quiz.firstTry.add(wi);
     quiz.combo++; quiz.correct++;
     quiz.bestCombo = Math.max(quiz.bestCombo, quiz.combo);
     if (quiz.combo % 5 === 0) bonus = 10;
+    if (!quiz.missed.has(wi)) { w.box = Math.min(5, (w.box || 0) + 1); w.due = today() + BOX_DAYS[w.box]; }
     w.ok++; quiz.queue.shift(); quiz.done++;
     sfxRight();
   } else {
     quiz.combo = 0;
     quiz.missed.add(wi); w.ko++;
+    w.box = 1; w.due = today();
     quiz.queue.shift();
     quiz.queue.splice(Math.min(3, quiz.queue.length), 0, wi);
     sfxWrong();
@@ -1396,7 +1512,7 @@ function answer(result) {
   quiz.xp += gained + bonus;
   // Beim Wählen und mit «Wort vorlesen lassen» immer, beim Schreiben nur nach einem Fehler: weiter erst, wenn das Wort vorgelesen ist.
   // Meldet der Browser das Ende nie, gibt eine Zeitgrenze den Knopf frei.
-  quiz.heard = ok && quiz.mode === "write" && !quiz.readAsk;
+  quiz.heard = ok && quiz.mode !== "choose" && !quiz.readAsk;
   const unlock = () => {
     clearTimeout(unlockTimer);
     if (quiz.heard || view.name !== "quiz" || quiz.current !== wi || !quiz.answered) return;
@@ -1419,6 +1535,7 @@ function answer(result) {
       <div class="row">
         ${gained ? `<span class="gain">+${gained}${bonus ? ` <em>+${bonus} Serie!</em>` : ""}</span>` : ""}
         <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
+        ${speakBackBtn()}
         ${quiz.mode === "choose" ? `<button class="primary" id="nextBtn" ${quiz.heard ? "" : "disabled"}>Weiter</button>` : ""}
       </div></div>`;
   else fb.innerHTML = `<div class="feedback wrong pop-card" role="dialog" aria-modal="true" aria-labelledby="popHead">
@@ -1429,6 +1546,7 @@ function answer(result) {
       </div>
       <div class="row" style="justify-content:center">
         <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
+        ${speakBackBtn()}
         <button class="primary" id="nextBtn" ${quiz.heard ? "" : "disabled"}>Weiter</button>
       </div></div>`;
   $("#hudXp").textContent = quiz.xp;
@@ -1437,6 +1555,7 @@ function answer(result) {
   hc.classList.toggle("hot", quiz.combo >= 2);
   if (bonus) { hc.classList.remove("pop"); void hc.offsetWidth; hc.classList.add("pop"); confetti(50); }
   $("#sayAgain").onclick = () => speak(w.f, list.lang, $("#solWord"), 0, unlock);
+  $("#speakBack")?.addEventListener("click", e => speakBack(w.f, list.lang, e.currentTarget));
   $("#nextBtn")?.addEventListener("click", next);
   if ($("#check")) $("#check").disabled = !quiz.heard;
   if (quiz.heard) ($("#nextBtn") || $("#check"))?.focus();
@@ -1459,10 +1578,10 @@ function finishQuiz() {
   list.points = (list.points || 0) + quiz.xp;
   list.best = Math.max(quiz.prevBest, quiz.xp);
   s.correct += quiz.correct; s.sessions++;
-  if (quiz.mode === "write") s.writeSessions++;
+  if (quiz.mode !== "choose") s.writeSessions++;
   s.bestCombo = Math.max(s.bestCombo, quiz.bestCombo);
   if (perfect) s.perfect++;
-  s.lastDay = today();
+  countDay(s);
   // Nur ganze Durchgänge zählen, «Nur schwierige» nicht. Neu setzen, damit die Liste in der Reihenfolge ans Ende rückt.
   const count = [...listCount(list.id)];
   if (quiz.total === list.words.length) count[0]++;
@@ -1578,14 +1697,13 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 
 // Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
 const NEWS = {
-  id: "2026-11-08",
+  id: "2026-11-09",
   items: [
-    "Beim Wählen und mit «Wort vorlesen lassen» geht es erst weiter, wenn du das Wort gehört hast. Beim Schreiben nur nach einem Fehler.",
-    "Neue Option «Wort vorlesen lassen» und nach dem Wählen die Frage, ob du die Liste schreiben möchtest.",
-    "«Wähle ein Wort» geht pro Liste 5 Runden, Vorlesen hilft in den ersten 3. Danach schreibst und liest du selbst.",
-    "Bei einem Fehler zeigt ein Fenster das richtige Wort gross an.",
-    "Auf dem Tablet quer nutzt die App jetzt den ganzen Bildschirm.",
-    "Die Texterkennung liest auch quer oder schief fotografierte Blätter."
+    "Wörterbox: Jedes Wort kommt nach 1, 3, 7, 14 und 30 Tagen wieder. Unter «Heute fällig» siehst du, was dran ist.",
+    "Neuer Modus «Diktat»: Du hörst das Wort und schreibst es.",
+    "Tages-Serie: Lerne jeden Tag, ein freier Tag pro Woche ist erlaubt.",
+    "Nachsprechen: In den Einstellungen einschalten und das Wort ins Mikrofon sprechen.",
+    "Übersicht für Eltern mit Lerntagen und schwierigen Wörtern, auch zum Teilen."
   ]
 };
 function showNews() {
