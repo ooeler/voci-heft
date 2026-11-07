@@ -316,6 +316,9 @@ function cheer() {
   $(".cheer")?.remove();
   const box = document.createElement("div");
   box.className = "cheer"; box.setAttribute("aria-hidden", "true");
+  // In der Mitte des sichtbaren Bereichs starten, damit die Bildschirmtastatur beim Schreiben sie nicht verdeckt
+  const vv = window.visualViewport;
+  box.style.top = Math.round(vv ? vv.offsetTop + vv.height * 0.55 : innerHeight * 0.55) + "px";
   box.innerHTML = shuffle(CHEERS).slice(0, 5).map((e, i) => `<span style="left:${8 + i * 18 + Math.random() * 6}%;animation-delay:${i * 90}ms">${e}</span>`).join("");
   document.body.appendChild(box);
   setTimeout(() => box.remove(), 3300);
