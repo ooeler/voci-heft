@@ -30,6 +30,7 @@ Diese Datei beschreibt, was die App aus Sicht der Benutzer können muss. Alles a
 
 ## C. Punkte und Motivation
 
+- **C0 Freude:** Bei einer richtigen Antwort steigen ein paar Emojis auf und verschwinden nach etwa 3 Sekunden.
 - **C1 Punkte:** Richtig beim ersten Versuch gibt 10 Punkte beim Wählen und 15 beim Schreiben. Richtig nach einem Fehler gibt 0 Punkte, weil jedes Wort pro Runde nur einmal zählt.
 - **C2 Bonus:** Alle 5 richtigen Antworten hintereinander geben 10 Bonuspunkte. Eine ganze Runde ohne Fehler gibt 20 Bonuspunkte.
 - **C3 Punktestand:** Die Punkte stehen pro Voci-Satz, als Rekord pro Runde und als Total. Der Total steigt nach einer Runde genau um die Punkte dieser Runde.
