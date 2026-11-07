@@ -23,11 +23,17 @@ Diese Datei beschreibt, was die App aus Sicht der Benutzer können muss. Alles a
 - **B9 Grenzen pro Liste:** «Wähle ein Wort» geht pro Liste 5 Runden, danach startet die Liste im Modus «Schreibe das Wort». Nach jeder Runde «Wähle ein Wort» fragt die App, ob man die Liste jetzt schreiben möchte. Mit «Wort vorlesen lassen» wird auch das deutsche Wort vorgelesen, pro Liste in den ersten 3 Runden. Die Liste zeigt, wie oft das noch geht.
 - **B7 Nur schwierige:** Gibt es Wörter mit mehr Fehlern als Treffern, erscheint auf der Liste „Nur schwierige“. Diese Runde enthält nur diese Wörter.
 
+- **B10 Wörterbox:** Richtig beim ersten Versuch bringt ein Wort ein Fach weiter, ein Fehler zurück ins erste Fach. Die Übersicht zeigt «Heute fällig», eine Liste mit fälligen und nicht fälligen Wörtern hat den Knopf «Fällige üben».
+- **B11 Diktat:** Im Modus «Diktat» wird das Fremdwort nur vorgelesen, nicht angezeigt. Man schreibt es und bekommt dieselbe Rückmeldung wie beim Schreiben. In der Testumgebung gibt es vermutlich keinen Ton.
+- **B12 Nachsprechen:** In den Einstellungen lässt sich «Nachsprechen üben» einschalten, wenn der Browser Spracherkennung kann. Dann gibt es nach einer Antwort einen Mikrofon-Knopf. In der Testumgebung nicht prüfbar.
+
 ## C. Punkte und Motivation
 
 - **C1 Punkte:** Richtig beim ersten Versuch gibt 10 Punkte beim Wählen und 15 beim Schreiben. Richtig nach einem Fehler gibt 0 Punkte, weil jedes Wort pro Runde nur einmal zählt.
 - **C2 Bonus:** Alle 5 richtigen Antworten hintereinander geben 10 Bonuspunkte. Eine ganze Runde ohne Fehler gibt 20 Bonuspunkte.
 - **C3 Punktestand:** Die Punkte stehen pro Voci-Satz, als Rekord pro Runde und als Total. Der Total steigt nach einer Runde genau um die Punkte dieser Runde.
+- **C7 Tages-Serie:** Die Übersicht zeigt, an wie vielen Tagen in Folge gelernt wurde. Es gibt Abzeichen für 7 und 30 Tage.
+- **C8 Übersicht für Eltern:** Über «Übersicht für Eltern» gibt es Lerntage der letzten 4 Wochen, Serie, Wörter nach Fach und pro Liste die schwierigen Wörter, dazu einen Knopf «Teilen».
 - **C4 Level, Sterne, Abzeichen:** Level 2 beginnt bei 100 Punkten, Level 3 bei 300. Eine Liste hat 1 Stern, wenn ein Drittel der Wörter sitzt, 2 Sterne bei zwei Dritteln, 3 bei allen. Neue Abzeichen werden gemeldet und in der Übersicht markiert. Es gibt Abzeichen für 10, 20, 50 und 100 Lernrunden und für Listen, die 5 Mal ganz gelernt wurden. Alle 5 ganzen Durchgänge einer Liste gibt es am Rundenende ein Lob.
 - **C5 Jahreszeiten:** Stempel neben dem Titel, Gruss in der Übersicht und Konfetti passen zur Jahreszeit oder zum Fest. Beim Öffnen der Übersicht rieselt es einmal kurz, ohne Bedienung oder Lesbarkeit zu stören.
 - **C6 Rückkehr:** Nach mindestens 3 Tagen ohne Runde begrüsst die Übersicht freundlich und schlägt eine Liste vor. Nach einer Runde verschwindet die Begrüssung. In der Testumgebung kommt das nicht vor.

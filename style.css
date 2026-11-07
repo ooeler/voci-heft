@@ -274,3 +274,13 @@ body.maint-open { overflow: hidden; }
 .pop-words { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--ink); }
 .pop-de { font-size: 1.3rem; color: var(--muted); overflow-wrap: anywhere; }
 .pop-card .sol { font-size: clamp(2rem, 8vw, 2.8rem); color: var(--ink); }
+
+/* Übersicht für Eltern */
+.days { display: grid; grid-template-columns: repeat(14, 1fr); gap: 4px; max-width: 420px; }
+.days i { aspect-ratio: 1; border-radius: 4px; background: var(--grid); border: 1px solid var(--line); }
+.days i.on { background: var(--green); border-color: var(--green); }
+.days i.today { outline: 2px solid var(--blue); outline-offset: 1px; }
+.parent-list { display: flex; flex-direction: column; gap: 4px; padding-block: 10px; border-bottom: 1px dashed var(--line); }
+.parent-list:last-child { border-bottom: 0; }
+/* Nachsprechen: Mikrofon hört zu */
+.speak.listening { background: var(--red-soft); color: var(--red); animation: pop 1s ease infinite; }
