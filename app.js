@@ -508,6 +508,7 @@ let view = { name: "loading" };
 function go(v) { stopSpeak(); view = v; render(); window.scrollTo({ top: 0 }); if (updateReady && !busy()) applyUpdate(); }
 function render() {
   const app = $("#app");
+  app.dataset.view = view.name;
   const top = $("#topActions");
   $(".stamp").textContent = season().stamp;
   if (!user) top.innerHTML = "";
@@ -1365,8 +1366,8 @@ function answer(result) {
     sfxWrong();
   }
   quiz.xp += gained + bonus;
-  // Weiter geht es erst, wenn das Wort vorgelesen ist. Meldet der Browser das Ende nie, gibt eine Zeitgrenze den Knopf frei.
-  quiz.heard = false;
+  // Nach einem Fehler geht es erst weiter, wenn das Wort vorgelesen ist. Meldet der Browser das Ende nie, gibt eine Zeitgrenze den Knopf frei.
+  quiz.heard = ok;
   const unlock = () => {
     clearTimeout(unlockTimer);
     if (quiz.heard || view.name !== "quiz" || quiz.current !== wi || !quiz.answered) return;
@@ -1386,7 +1387,7 @@ function answer(result) {
       <div class="row">
         ${gained ? `<span class="gain">+${gained}${bonus ? ` <em>+${bonus} Serie!</em>` : ""}</span>` : ""}
         <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
-        ${quiz.mode === "choose" ? `<button class="primary" id="nextBtn" disabled>Weiter</button>` : ""}
+        ${quiz.mode === "choose" ? `<button class="primary" id="nextBtn" ${ok ? "" : "disabled"}>Weiter</button>` : ""}
       </div></div>`;
   $("#hudXp").textContent = quiz.xp;
   const hc = $("#hudCombo");
@@ -1396,6 +1397,7 @@ function answer(result) {
   $("#sayAgain").onclick = () => speak(w.f, list.lang, $("#solWord"), 0, unlock);
   $("#nextBtn")?.addEventListener("click", next);
   if ($("#check")) $("#check").disabled = !quiz.heard;
+  if (ok) ($("#nextBtn") || $("#check"))?.focus();
 }
 function next() {
   if (quiz.answered && !quiz.heard) return;
@@ -1526,6 +1528,33 @@ async function checkMaintenance() {
 checkMaintenance();
 setInterval(() => { if (maintActive || !document.hidden) checkMaintenance(); }, 60 * 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkMaintenance(); });
+
+// Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
+const NEWS = {
+  id: "2026-11-07",
+  items: [
+    "Nach einem Fehler geht es erst weiter, wenn du das Wort gehört hast.",
+    "Auf dem Tablet quer nutzt die App jetzt den ganzen Bildschirm.",
+    "Die Texterkennung liest auch quer oder schief fotografierte Blätter."
+  ]
+};
+function showNews() {
+  let returning = false;
+  try { returning = Object.keys(localStorage).some(k => k.startsWith("voci-heft-")); } catch {}
+  if (lsGet("voci-heft-news", null) === NEWS.id) return;
+  lsSet("voci-heft-news", NEWS.id);
+  if (!returning) return; // Neue Geräte kennen die alte Version nicht
+  const el = document.createElement("div");
+  el.id = "news"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-labelledby", "newsTitle");
+  el.innerHTML = `<div class="sheet maint-card">${MAINT_ICON}<h2 id="newsTitle">Update installiert</h2><p>Das ist neu:</p>
+    <ul class="news-list">${NEWS.items.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
+    <button class="primary" id="newsOk">Los geht's</button></div>`;
+  document.body.appendChild(el);
+  document.body.classList.add("maint-open");
+  $("#newsOk").onclick = () => { el.remove(); if (!$("#maintenance")) document.body.classList.remove("maint-open"); };
+  $("#newsOk").focus();
+}
+showNews();
 
 /* ---------- Start ---------- */
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
