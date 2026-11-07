@@ -310,6 +310,16 @@ function drawPart(ctx, p, shape) {
   else { ctx.beginPath(); ctx.ellipse(0, 0, p.r / 2, shape === "leaf" ? p.r / 4 : p.r / 2, 0, 0, 7); ctx.fill(); }
   ctx.restore();
 }
+// Bei richtiger Antwort steigen ein paar fröhliche Emojis auf und blenden nach etwa 3 Sekunden aus
+const CHEERS = ["😀", "🎉", "⭐", "👍", "🥳", "💪", "🌟", "😎", "👏", "🤩"];
+function cheer() {
+  $(".cheer")?.remove();
+  const box = document.createElement("div");
+  box.className = "cheer"; box.setAttribute("aria-hidden", "true");
+  box.innerHTML = shuffle(CHEERS).slice(0, 5).map((e, i) => `<span style="left:${8 + i * 18 + Math.random() * 6}%;animation-delay:${i * 90}ms">${e}</span>`).join("");
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 3300);
+}
 function confetti(amount = 140) {
   const fx = effectCanvas();
   if (!fx) return;
@@ -1538,7 +1548,7 @@ function answer(result) {
     if (quiz.combo % 5 === 0) bonus = 10;
     if (!quiz.missed.has(wi)) { w.box = Math.min(5, (w.box || 0) + 1); w.due = today() + BOX_DAYS[w.box]; }
     w.ok++; quiz.queue.shift(); quiz.done++;
-    sfxRight();
+    sfxRight(); cheer();
   } else {
     quiz.combo = 0;
     quiz.missed.add(wi); w.ko++;
@@ -1735,8 +1745,9 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 
 // Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
 const NEWS = {
-  id: "2026-11-10",
+  id: "2026-11-11",
   items: [
+    "Bei richtigen Antworten gibt es fröhliche Emojis.",
     "Tipp beim Schreiben: Pro Klick kommt ein Buchstabe dazu, danach 3 Sekunden warten. Mit Tipp kommt das Wort gleich nochmals.",
     "Wörterbox: Jedes Wort kommt nach 1, 3, 7, 14 und 30 Tagen wieder. Unter «Heute fällig» siehst du, was dran ist.",
     "Neuer Modus «Diktat»: Du hörst das Wort und schreibst es.",
