@@ -20,12 +20,12 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app
           path: dist
           retention-days: 1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tester
           path: qa
@@ -87,7 +87,7 @@ jobs:
         working-directory: ${{ runner.temp }}/tester
         run: node report.mjs
       - if: steps.key.outputs.aktiv == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bericht
           path: ${{ runner.temp }}/tester/bericht
