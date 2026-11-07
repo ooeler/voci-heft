@@ -1,5 +1,9 @@
 "use strict";
 
+if (window.top !== window.self) {
+  document.documentElement.style.display = "none";
+  try { window.top.location = window.self.location.href; } catch {}
+}
 const CFG = window.VOCI_CONFIG || {};
 const LANGS = [
   ["en-GB", "Englisch", "eng"], ["fr-FR", "Französisch", "fra"], ["it-IT", "Italienisch", "ita"], ["es-ES", "Spanisch", "spa"],
@@ -56,7 +60,8 @@ let pending = { lists: [], deleted: [], profile: false };
 /* Daten aus Sicherungsdateien, Server und Zwischenspeicher nie ungeprüft übernehmen.
    Die Grenzen entsprechen den Regeln in datenbank.sql. */
 const MAX_WORDS = 1000, MAX_TEXT = 300, MAX_NAME = 120, MAX_ROUND_LISTS = 30;
-const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const ID_RE = /^(?!(?:__proto__|constructor|prototype)$)[A-Za-z0-9_-]{1,64}$/;
+const MAX_LISTS = 200;
 const int = (v, max = 1e9) => Math.min(max, Math.max(0, Math.floor(Number(v)) || 0));
 const str = (v, max) => (typeof v === "string" ? v : "").slice(0, max);
 function normalizeList(l) {
@@ -161,7 +166,7 @@ const levelPct = xp => { const n = levelOf(xp); return Math.round((xp - xpNeed(n
 const known = w => w.ok > 0 && w.ok >= w.ko;
 // Wählen ist eine Hilfe für den Anfang: pro Liste 5 Runden, danach wird geschrieben. Vorlesen hilft in den ersten 3 Runden.
 const MAX_CHOOSE = 5, MAX_READ = 3;
-const listCount = id => profile.stats.listRounds[id] || [0, 0, 0];
+const listCount = id => Object.hasOwn(profile.stats.listRounds, id) ? profile.stats.listRounds[id] : [0, 0, 0];
 const chooseLeft = id => Math.max(0, MAX_CHOOSE - listCount(id)[1]);
 const readLeft = id => Math.max(0, MAX_READ - listCount(id)[2]);
 const listStars = l => { const n = l.words.length; if (!n) return 0; const k = l.words.filter(known).length / n; return k >= 1 ? 3 : k >= 2 / 3 ? 2 : k >= 1 / 3 ? 1 : 0; };
@@ -471,7 +476,7 @@ function syllabify(word, lang) {
 function sylHTML(text, lang) {
   const t = String(text).split(/(\s+|[\/(),])/).map(w => /\p{L}{2}/u.test(w) && !/[\s\/(),]/.test(w) ? syllabify(w, lang).join("·") : w).join("");
   return `<span class="syls" lang="${esc(lang)}">` + t.split(/(\s+)/).map(part => {
-    if (/^\s+$/.test(part) || !part) return part;
+    if (/^\s+$/.test(part) || !part) return esc(part);
     return part.split("·").map(s => /\p{L}/u.test(s) ? `<span class="syl">${esc(s)}</span>` : esc(s)).join(`<span class="dot" aria-hidden="true">·</span>`);
   }).join("") + `</span>`;
 }
@@ -681,7 +686,7 @@ function renderHome(app) {
             <div class="bar"><i style="width:${n ? Math.round(k / n * 100) : 0}%"></i></div>
             <span class="small muted">${k} von ${n} Wörtern sitzen${s < 3 && n ? ` · noch ${Math.ceil([1 / 3, 2 / 3, 1][s] * n) - k} bis zum nächsten Stern` : s === 3 ? " · gemeistert!" : ""}</span>
           </div>
-          <div class="list-points small"><span class="inline-stat">${STAR()} <b>${l.points || 0}</b>&nbsp;Punkte in diesem Voci-Satz</span>${l.best ? `<span class="muted">Rekord pro Runde: <b>${l.best}</b></span>` : ""}</div>
+          <div class="list-points small"><span class="inline-stat">${STAR()} <b>${int(l.points)}</b>&nbsp;Punkte in diesem Voci-Satz</span>${l.best ? `<span class="muted">Rekord pro Runde: <b>${int(l.best)}</b></span>` : ""}</div>
           <div class="row">
             <button class="primary" data-learn="${esc(l.id)}" ${n < 2 ? "disabled" : ""}>Lernen</button>
             ${l.words.some(w => w.ko > w.ok) ? `<button data-learn-hard="${esc(l.id)}">Nur schwierige</button>` : ""}
@@ -731,7 +736,7 @@ function renderSettings(app) {
       <h2>Vorlesen und Klänge</h2>
       <div class="settings">
         <label for="rate">Vorlese-Tempo</label>
-        <input type="range" id="rate" min="0.6" max="1.2" step="0.05" value="${prefs.rate}">
+        <input type="range" id="rate" min="0.6" max="1.2" step="0.05" value="${Number(prefs.rate) || 0.9}">
       </div>
       <div class="voice-pick" id="voicePick"></div>
       <p class="small muted">Die Stimmen kommen von deinem Gerät. Die App nimmt automatisch die beste und merkt sich hier deine Wahl. Klingt alles blechern, kannst du in den Einstellungen des Geräts bessere Stimmen laden. Am iPhone geht das unter Bedienungshilfen, Gesprochene Inhalte, Stimmen.</p>
@@ -742,7 +747,7 @@ function renderSettings(app) {
       <p>Ohne weitere Einstellung liest die App Fotos direkt auf deinem Gerät. Das klappt gut bei gedruckten Listen mit zwei Spalten. Bei Handschrift oder komplizierten Seiten erkennt Claude die Wörter viel besser.</p>
       <p class="small muted">Für Claude brauchst du einen eigenen API-Schlüssel von console.anthropic.com. Ein Scan kostet etwa 2 bis 5 Rappen. Der Schlüssel bleibt nur auf diesem Gerät gespeichert und wird nur an Anthropic gesendet.</p>
       <div class="field"><label class="label" for="apikey">Claude API-Schlüssel</label>
-        <div class="key-row"><input type="password" id="apikey" placeholder="sk-ant-…" value="${esc(key)}" autocomplete="off">
+        <div class="key-row"><input type="password" id="apikey" placeholder="${key ? "Gespeichert. Neuen Schlüssel hier eingeben" : "sk-ant-…"}" autocomplete="off">
           <button class="primary" id="saveKey">Speichern</button>
           ${key ? `<button class="danger" id="delKey">Entfernen</button>` : ""}</div></div>
       <div id="keyStatus">${key ? `<div class="status ok">Claude ist eingerichtet. Neue Scans laufen über Claude.</div>` : ""}</div>
@@ -766,7 +771,8 @@ function renderSettings(app) {
   $("#sound").onchange = e => { prefs.sound = e.target.checked; savePrefs(); if (prefs.sound) sfxRight(); };
   $("#saveKey").onclick = () => {
     const v = $("#apikey").value.trim();
-    if (v && !v.startsWith("sk-ant-")) { $("#keyStatus").innerHTML = `<div class="status err">Das sieht nicht wie ein Claude-Schlüssel aus. Er beginnt mit „sk-ant-“.</div>`; return; }
+    if (!v) return; // Entfernen geht über den eigenen Knopf
+    if (!v.startsWith("sk-ant-")) { $("#keyStatus").innerHTML = `<div class="status err">Das sieht nicht wie ein Claude-Schlüssel aus. Er beginnt mit „sk-ant-“.</div>`; return; }
     setApiKey(v); renderSettings(app);
   };
   $("#delKey")?.addEventListener("click", () => { setApiKey(""); renderSettings(app); });
@@ -785,6 +791,10 @@ function renderSettings(app) {
       const data = JSON.parse(await f.text());
       const incoming = normalizeLists(data?.lists).filter(l => l.id !== EXAMPLE.id);
       if (!incoming.length) throw new Error();
+      if (new Set([...lists.map(l => l.id), ...incoming.map(l => l.id)]).size > MAX_LISTS) {
+        $("#backupStatus").innerHTML = `<div class="status err">Mehr als ${MAX_LISTS} Listen gehen nicht. Lösche zuerst ein paar alte Listen.</div>`;
+        return;
+      }
       for (const l of incoming) { const i = lists.findIndex(x => x.id === l.id); if (i >= 0) lists[i] = l; else lists.push(l); persistList(l); }
       $("#backupStatus").innerHTML = `<div class="status ok">${incoming.length} Listen geladen.</div>`;
     } catch {
@@ -901,7 +911,8 @@ function addPairs(pairs) {
   const seen = new Set(L.words.map(w => (w.d + "|" + w.f).toLowerCase()));
   let added = 0;
   for (const p of pairs) {
-    const d = String(p.de).trim(), f = String(p.fx).trim();
+    if (L.words.length >= MAX_WORDS) break;
+    const d = String(p.de).trim().slice(0, MAX_TEXT), f = String(p.fx).trim().slice(0, MAX_TEXT);
     const key = (d + "|" + f).toLowerCase();
     if (!d || !f || seen.has(key)) continue;
     seen.add(key);
@@ -951,6 +962,7 @@ async function scanOnDevice() {
       ocrWorker = await Tesseract.createWorker(langs, 1, {
         workerPath: new URL("vendor/tesseract-worker.min.js", location.href).href,
         corePath: new URL("vendor/tesseract-core", location.href).href, workerBlobURL: false,
+        langPath: new URL("vendor/lang", location.href).href,
         logger: m => { if (m.status === "recognizing text") progress(Math.round(((current + m.progress) / total) * 100)); }
       });
       await ocrWorker.setParameters({ tessedit_pageseg_mode: "4", preserve_interword_spaces: "1", user_defined_dpi: "300" });
@@ -1477,7 +1489,7 @@ function renderDone(app) {
       <span class="score">+${quiz.xp}</span>
       <span class="muted">Punkte in dieser Runde${r.perfect ? " (inklusive 20 Bonuspunkte für eine Runde ohne Fehler)" : ""}</span>
       <div class="tally">
-        <div><span class="label">Dieser Voci-Satz</span><b>${list.points}</b><span class="small muted">${r.record ? `Neuer Rekord! Vorher ${quiz.prevBest}` : `Rekord pro Runde: ${list.best}`}</span></div>
+        <div><span class="label">Dieser Voci-Satz</span><b>${int(list.points)}</b><span class="small muted">${r.record ? `Neuer Rekord! Vorher ${int(quiz.prevBest)}` : `Rekord pro Runde: ${int(list.best)}`}</span></div>
         <div><span class="label">Total alle Listen</span><b>${profile.xp}</b><span class="small muted">Level ${lvl}</span></div>
       </div>
       <p class="big-praise">${r.perfect ? "Alles beim ersten Versuch gewusst. Wahnsinn!" : pct >= 75 ? "Sehr gut! Noch ein paar Wörter üben, dann sitzt die Liste." : pct >= 40 ? "Gut gemacht! Jede Runde bringt dich weiter." : "Toll, dass du übst! Die schwierigen Wörter gleich nochmals?"}</p>

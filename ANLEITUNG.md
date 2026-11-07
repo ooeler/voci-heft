@@ -127,6 +127,9 @@ Die Bibliotheken (Supabase, Texterkennung, Silben, Claude) kommen nicht von frem
 - **Dependabot** prüft jede Woche, ob es neue Versionen gibt, und öffnet dafür einen Pull Request. Sicherheitslücken meldet es sofort.
 - Der Workflow **„PR prüfen“** baut die App mit der neuen Version. Klappt das, übernimmt er das Update und veröffentlicht die App.
 - **Grosse Versionssprünge** (zum Beispiel von 2.x auf 3.x) laufen genauso automatisch durch. Sie können die App verändern, darum fängt nur der Build grobe Fehler ab, solange der Black-Box-Test keinen Schlüssel hat.
+- **Wartezeit:** Dependabot nimmt neue Versionen erst nach 3 Tagen, grosse Sprünge nach 7. Gekaperte Releases werden meist in dieser Zeit zurückgezogen.
+- **Smoke-Test:** Vor jedem Merge startet die gebaute App in einem Browser. Er prüft Anmeldeseite, eine Quizfrage, Claude-SDK, Supabase und die Texterkennung mit einem Testbild (`qa/smoke.mjs`). Dafür braucht es keinen Schlüssel.
+- **Workflow-Dateien:** Alle Actions-Updates kommen in einem gemeinsamen PR. Scheitert der Merge trotzdem, bittet der Workflow Dependabot, den PR neu aufzusetzen.
 
 ## Automatischer Test bei jedem Pull Request
 

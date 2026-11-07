@@ -22,6 +22,10 @@ for (const f of await readdir(nm("tesseract.js-core")))
 await cp(nm("hyphen/hyphen.js"), OUT + "/vendor/hyphen/hyphen.js");
 for (const p of ["en-gb", "fr", "it", "es", "pt", "nl", "la"])
   await cp(nm(`hyphen/patterns/${p}.js`), `${OUT}/vendor/hyphen/patterns/${p}.js`);
+// Sprachdaten der Texterkennung selbst ausliefern statt vom CDN laden
+await mkdir(OUT + "/vendor/lang", { recursive: true });
+for (const l of ["deu", "eng", "fra", "ita", "spa", "por", "nld", "lat"])
+  await cp(nm(`@tesseract.js-data/${l}/4.0.0_best_int/${l}.traineddata.gz`), `${OUT}/vendor/lang/${l}.traineddata.gz`);
 
 // Das Claude-SDK ist ein Node-Paket; esbuild macht daraus eine einzelne Datei für den Browser.
 await build({

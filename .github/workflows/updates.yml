@@ -1,5 +1,5 @@
 # Prüft jeden Pull Request: Build, danach Black-Box-Test ohne Zugriff auf den Code.
-# Updates von Dependabot werden übernommen, wenn beides klappt, auch grosse Versionssprünge.
+# Updates von Dependabot werden übernommen, wenn Build, Smoke-Test und Black-Box-Test klappen, auch grosse Versionssprünge.
 name: PR prüfen
 
 on: pull_request
@@ -20,6 +20,12 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - name: Smoke-Test (Start, Quiz, Bibliotheken, Texterkennung)
+        working-directory: qa
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+          node smoke.mjs ../dist
       - uses: actions/upload-artifact@v7
         with:
           name: app
@@ -116,8 +122,15 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.html_url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
         run: |
-          gh pr merge "$PR" --squash --delete-branch
+          # Nur genau den geprüften Stand übernehmen
+          if ! gh pr merge "$PR" --squash --delete-branch --match-head-commit "$SHA"; then
+            # Basiert der PR auf einem alten Stand von main, kann GITHUB_TOKEN ihn nicht mergen.
+            # Dependabot setzt ihn dann neu auf, das startet die Prüfung und diesen Job nochmals.
+            gh pr comment "$PR" --body "@dependabot rebase"
+            exit 1
+          fi
           # Änderungen durch GITHUB_TOKEN starten keinen push-Workflow, darum direkt veröffentlichen
           gh workflow run deploy.yml --repo "$REPO" --ref main
