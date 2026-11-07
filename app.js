@@ -1,5 +1,9 @@
 "use strict";
 
+if (window.top !== window.self) {
+  document.documentElement.style.display = "none";
+  try { window.top.location = window.self.location.href; } catch {}
+}
 const CFG = window.VOCI_CONFIG || {};
 const LANGS = [
   ["en-GB", "Englisch", "eng"], ["fr-FR", "Französisch", "fra"], ["it-IT", "Italienisch", "ita"], ["es-ES", "Spanisch", "spa"],
@@ -55,8 +59,9 @@ let pending = { lists: [], deleted: [], profile: false };
 
 /* Daten aus Sicherungsdateien, Server und Zwischenspeicher nie ungeprüft übernehmen.
    Die Grenzen entsprechen den Regeln in datenbank.sql. */
-const MAX_WORDS = 1000, MAX_TEXT = 300, MAX_NAME = 120, MAX_ROUND_LISTS = 50;
-const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_WORDS = 1000, MAX_TEXT = 300, MAX_NAME = 120, MAX_ROUND_LISTS = 30;
+const ID_RE = /^(?!(?:__proto__|constructor|prototype)$)[A-Za-z0-9_-]{1,64}$/;
+const MAX_LISTS = 200;
 const int = (v, max = 1e9) => Math.min(max, Math.max(0, Math.floor(Number(v)) || 0));
 const str = (v, max) => (typeof v === "string" ? v : "").slice(0, max);
 function normalizeList(l) {
@@ -75,8 +80,10 @@ function normalizeProfile(p) {
   if (!p || typeof p !== "object") return out;
   out.xp = int(p.xp);
   for (const k of Object.keys(out.stats)) if (k !== "listRounds") out.stats[k] = int(p.stats?.[k]);
-  // Ganze Runden pro Liste. Die neusten zuerst behalten, damit die Grenze in datenbank.sql hält.
-  out.stats.listRounds = Object.fromEntries(Object.entries(p.stats?.listRounds || {}).filter(([id]) => ID_RE.test(id)).slice(-MAX_ROUND_LISTS).map(([id, n]) => [id, int(n, 1e6)]));
+  // Zähler pro Liste: [ganze Durchgänge, Runden «Wähle ein Wort», Runden mit Vorlesen].
+  // Nur die zuletzt gelernten Listen behalten, damit die Grenze in datenbank.sql hält. Früher war es nur eine Zahl.
+  out.stats.listRounds = Object.fromEntries(Object.entries(p.stats?.listRounds || {}).filter(([id]) => ID_RE.test(id)).slice(-MAX_ROUND_LISTS)
+    .map(([id, n]) => [id, (Array.isArray(n) ? [0, 1, 2].map(i => n[i]) : [n, 0, 0]).map(v => int(v, 1e6))]));
   for (const b of BADGES) if (p.badges?.[b.id]) out.badges[b.id] = typeof p.badges[b.id] === "number" ? p.badges[b.id] : true;
   return out;
 }
@@ -157,6 +164,11 @@ const levelOf = xp => { let n = 1; while (xp >= xpNeed(n + 1)) n++; return n; };
 const levelName = n => LEVEL_NAMES[Math.min(n - 1, LEVEL_NAMES.length - 1)];
 const levelPct = xp => { const n = levelOf(xp); return Math.round((xp - xpNeed(n)) / (xpNeed(n + 1) - xpNeed(n)) * 100); };
 const known = w => w.ok > 0 && w.ok >= w.ko;
+// Wählen ist eine Hilfe für den Anfang: pro Liste 5 Runden, danach wird geschrieben. Vorlesen hilft in den ersten 3 Runden.
+const MAX_CHOOSE = 5, MAX_READ = 3;
+const listCount = id => Object.hasOwn(profile.stats.listRounds, id) ? profile.stats.listRounds[id] : [0, 0, 0];
+const chooseLeft = id => Math.max(0, MAX_CHOOSE - listCount(id)[1]);
+const readLeft = id => Math.max(0, MAX_READ - listCount(id)[2]);
 const listStars = l => { const n = l.words.length; if (!n) return 0; const k = l.words.filter(known).length / n; return k >= 1 ? 3 : k >= 2 / 3 ? 2 : k >= 1 / 3 ? 1 : 0; };
 
 const BADGES = [
@@ -180,7 +192,7 @@ const BADGES = [
 ];
 function checkBadges() {
   const ctx = { lists: lists.length, mastered: lists.filter(l => listStars(l) === 3).length, langs: new Set(lists.map(l => l.lang)).size, level: levelOf(profile.xp),
-    fiveTimes: Object.values(profile.stats.listRounds).filter(n => n >= 5).length };
+    fiveTimes: Object.values(profile.stats.listRounds).filter(n => n[0] >= 5).length };
   const fresh = BADGES.filter(b => !profile.badges[b.id] && b.test(profile.stats, ctx));
   for (const b of fresh) profile.badges[b.id] = Date.now();
   return fresh;
@@ -464,7 +476,7 @@ function syllabify(word, lang) {
 function sylHTML(text, lang) {
   const t = String(text).split(/(\s+|[\/(),])/).map(w => /\p{L}{2}/u.test(w) && !/[\s\/(),]/.test(w) ? syllabify(w, lang).join("·") : w).join("");
   return `<span class="syls" lang="${esc(lang)}">` + t.split(/(\s+)/).map(part => {
-    if (/^\s+$/.test(part) || !part) return part;
+    if (/^\s+$/.test(part) || !part) return esc(part);
     return part.split("·").map(s => /\p{L}/u.test(s) ? `<span class="syl">${esc(s)}</span>` : esc(s)).join(`<span class="dot" aria-hidden="true">·</span>`);
   }).join("") + `</span>`;
 }
@@ -656,6 +668,8 @@ function renderHome(app) {
             <button data-dir="fx-de" aria-pressed="${prefs.dir === "fx-de"}">Fremdsprache → Deutsch</button>
           </div>
         </div>
+        <label class="row" style="gap:8px"><input type="checkbox" id="readAsk" ${prefs.readAsk ? "checked" : ""}> Wort vorlesen lassen</label>
+        <p class="small muted">Vorlesen hilft in den ersten ${MAX_READ} Runden einer Liste. «Wähle ein Wort» geht pro Liste ${MAX_CHOOSE} Runden, danach wird geschrieben.</p>
         <p class="small muted">${prefs.mode === "write" ? "Schreiben gibt 15 Punkte pro Wort." : "Wählen gibt 10 Punkte pro Wort, Schreiben sogar 15."} Punkte gibt es pro Runde einmal pro Wort, wenn es beim ersten Versuch sitzt. Alle 5 richtig hintereinander gibt es 10 Bonuspunkte.</p>
       </div>
     </section>
@@ -672,12 +686,16 @@ function renderHome(app) {
             <div class="bar"><i style="width:${n ? Math.round(k / n * 100) : 0}%"></i></div>
             <span class="small muted">${k} von ${n} Wörtern sitzen${s < 3 && n ? ` · noch ${Math.ceil([1 / 3, 2 / 3, 1][s] * n) - k} bis zum nächsten Stern` : s === 3 ? " · gemeistert!" : ""}</span>
           </div>
-          <div class="list-points small"><span class="inline-stat">${STAR()} <b>${l.points || 0}</b>&nbsp;Punkte in diesem Voci-Satz</span>${l.best ? `<span class="muted">Rekord pro Runde: <b>${l.best}</b></span>` : ""}</div>
+          <div class="list-points small"><span class="inline-stat">${STAR()} <b>${int(l.points)}</b>&nbsp;Punkte in diesem Voci-Satz</span>${l.best ? `<span class="muted">Rekord pro Runde: <b>${int(l.best)}</b></span>` : ""}</div>
           <div class="row">
             <button class="primary" data-learn="${esc(l.id)}" ${n < 2 ? "disabled" : ""}>Lernen</button>
             ${l.words.some(w => w.ko > w.ok) ? `<button data-learn-hard="${esc(l.id)}">Nur schwierige</button>` : ""}
             ${l.example ? "" : `<button class="ghost" data-edit="${esc(l.id)}">Bearbeiten</button>`}
           </div>
+          ${prefs.mode === "choose" || prefs.readAsk ? `<span class="small muted">${[
+            prefs.mode === "choose" ? (chooseLeft(l.id) ? `Wählen noch ${chooseLeft(l.id)} Mal` : "Wählen geschafft, jetzt wird geschrieben") : "",
+            prefs.readAsk ? (readLeft(l.id) ? `Vorlesen noch ${readLeft(l.id)} Mal` : "Vorlesen aufgebraucht, jetzt liest du selbst") : ""
+          ].filter(Boolean).join(" · ")}</span>` : ""}
         </article>`;
       }).join("")}
     </section>
@@ -693,6 +711,7 @@ function renderHome(app) {
   seasonFall();
   app.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { prefs.mode = b.dataset.mode; savePrefs(); render(); });
   app.querySelectorAll("[data-dir]").forEach(b => b.onclick = () => { prefs.dir = b.dataset.dir; savePrefs(); render(); });
+  $("#readAsk").onchange = e => { prefs.readAsk = e.target.checked; savePrefs(); render(); };
   app.querySelectorAll("[data-learn]").forEach(b => b.onclick = () => startQuiz(b.dataset.learn, false));
   app.querySelectorAll("[data-learn-hard]").forEach(b => b.onclick = () => startQuiz(b.dataset.learnHard, true));
   app.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
@@ -717,7 +736,7 @@ function renderSettings(app) {
       <h2>Vorlesen und Klänge</h2>
       <div class="settings">
         <label for="rate">Vorlese-Tempo</label>
-        <input type="range" id="rate" min="0.6" max="1.2" step="0.05" value="${prefs.rate}">
+        <input type="range" id="rate" min="0.6" max="1.2" step="0.05" value="${Number(prefs.rate) || 0.9}">
       </div>
       <div class="voice-pick" id="voicePick"></div>
       <p class="small muted">Die Stimmen kommen von deinem Gerät. Die App nimmt automatisch die beste und merkt sich hier deine Wahl. Klingt alles blechern, kannst du in den Einstellungen des Geräts bessere Stimmen laden. Am iPhone geht das unter Bedienungshilfen, Gesprochene Inhalte, Stimmen.</p>
@@ -728,7 +747,7 @@ function renderSettings(app) {
       <p>Ohne weitere Einstellung liest die App Fotos direkt auf deinem Gerät. Das klappt gut bei gedruckten Listen mit zwei Spalten. Bei Handschrift oder komplizierten Seiten erkennt Claude die Wörter viel besser.</p>
       <p class="small muted">Für Claude brauchst du einen eigenen API-Schlüssel von console.anthropic.com. Ein Scan kostet etwa 2 bis 5 Rappen. Der Schlüssel bleibt nur auf diesem Gerät gespeichert und wird nur an Anthropic gesendet.</p>
       <div class="field"><label class="label" for="apikey">Claude API-Schlüssel</label>
-        <div class="key-row"><input type="password" id="apikey" placeholder="sk-ant-…" value="${esc(key)}" autocomplete="off">
+        <div class="key-row"><input type="password" id="apikey" placeholder="${key ? "Gespeichert. Neuen Schlüssel hier eingeben" : "sk-ant-…"}" autocomplete="off">
           <button class="primary" id="saveKey">Speichern</button>
           ${key ? `<button class="danger" id="delKey">Entfernen</button>` : ""}</div></div>
       <div id="keyStatus">${key ? `<div class="status ok">Claude ist eingerichtet. Neue Scans laufen über Claude.</div>` : ""}</div>
@@ -752,7 +771,8 @@ function renderSettings(app) {
   $("#sound").onchange = e => { prefs.sound = e.target.checked; savePrefs(); if (prefs.sound) sfxRight(); };
   $("#saveKey").onclick = () => {
     const v = $("#apikey").value.trim();
-    if (v && !v.startsWith("sk-ant-")) { $("#keyStatus").innerHTML = `<div class="status err">Das sieht nicht wie ein Claude-Schlüssel aus. Er beginnt mit „sk-ant-“.</div>`; return; }
+    if (!v) return; // Entfernen geht über den eigenen Knopf
+    if (!v.startsWith("sk-ant-")) { $("#keyStatus").innerHTML = `<div class="status err">Das sieht nicht wie ein Claude-Schlüssel aus. Er beginnt mit „sk-ant-“.</div>`; return; }
     setApiKey(v); renderSettings(app);
   };
   $("#delKey")?.addEventListener("click", () => { setApiKey(""); renderSettings(app); });
@@ -771,6 +791,10 @@ function renderSettings(app) {
       const data = JSON.parse(await f.text());
       const incoming = normalizeLists(data?.lists).filter(l => l.id !== EXAMPLE.id);
       if (!incoming.length) throw new Error();
+      if (new Set([...lists.map(l => l.id), ...incoming.map(l => l.id)]).size > MAX_LISTS) {
+        $("#backupStatus").innerHTML = `<div class="status err">Mehr als ${MAX_LISTS} Listen gehen nicht. Lösche zuerst ein paar alte Listen.</div>`;
+        return;
+      }
       for (const l of incoming) { const i = lists.findIndex(x => x.id === l.id); if (i >= 0) lists[i] = l; else lists.push(l); persistList(l); }
       $("#backupStatus").innerHTML = `<div class="status ok">${incoming.length} Listen geladen.</div>`;
     } catch {
@@ -887,7 +911,8 @@ function addPairs(pairs) {
   const seen = new Set(L.words.map(w => (w.d + "|" + w.f).toLowerCase()));
   let added = 0;
   for (const p of pairs) {
-    const d = String(p.de).trim(), f = String(p.fx).trim();
+    if (L.words.length >= MAX_WORDS) break;
+    const d = String(p.de).trim().slice(0, MAX_TEXT), f = String(p.fx).trim().slice(0, MAX_TEXT);
     const key = (d + "|" + f).toLowerCase();
     if (!d || !f || seen.has(key)) continue;
     seen.add(key);
@@ -937,6 +962,7 @@ async function scanOnDevice() {
       ocrWorker = await Tesseract.createWorker(langs, 1, {
         workerPath: new URL("vendor/tesseract-worker.min.js", location.href).href,
         corePath: new URL("vendor/tesseract-core", location.href).href, workerBlobURL: false,
+        langPath: new URL("vendor/lang", location.href).href,
         logger: m => { if (m.status === "recognizing text") progress(Math.round(((current + m.progress) / total) * 100)); }
       });
       await ocrWorker.setParameters({ tessedit_pageseg_mode: "4", preserve_interword_spaces: "1", user_defined_dpi: "300" });
@@ -1243,17 +1269,18 @@ Lies alle Wortpaare heraus, in der Reihenfolge auf der Seite. "de" ist immer das
 
 /* ---------- Lernen ---------- */
 let quiz = null;
-function newQuiz(listId, idx) {
+function newQuiz(listId, idx, mode = prefs.mode) {
+  if (mode === "choose" && !chooseLeft(listId)) mode = "write";
   return { listId, queue: shuffle(idx), total: idx.length, done: 0, firstTry: new Set(), missed: new Set(), current: null, answered: false,
-           xp: 0, combo: 0, bestCombo: 0, correct: 0, startLevel: levelOf(profile.xp), mode: prefs.mode };
+           xp: 0, combo: 0, bestCombo: 0, correct: 0, startLevel: levelOf(profile.xp), mode, readAsk: !!prefs.readAsk && readLeft(listId) > 0 };
 }
-async function startQuiz(id, hardOnly) {
+async function startQuiz(id, hardOnly, mode) {
   const list = getList(id);
   await Promise.race([loadHyphenator(list.lang), new Promise(r => setTimeout(r, 2500))]);
   let idx = list.words.map((_, i) => i);
   if (hardOnly) idx = idx.filter(i => list.words[i].ko > list.words[i].ok);
   if (!idx.length) idx = list.words.map((_, i) => i);
-  quiz = newQuiz(id, idx);
+  quiz = newQuiz(id, idx, mode);
   go({ name: "quiz" });
 }
 
@@ -1305,7 +1332,7 @@ function renderQuiz(app) {
         <span class="label">${toFx ? "Deutsch" : esc(langName(list.lang))}</span>
         <div class="row" style="justify-content:center">
           <span class="word" id="askWord">${toFx ? esc(ask) : sylHTML(ask, list.lang)}</span>
-          ${toFx ? "" : `<button class="speak" id="sayAsk" aria-label="Vorlesen">${SPEAKER}</button>`}
+          ${toFx && !quiz.readAsk ? "" : `<button class="speak" id="sayAsk" aria-label="Vorlesen">${SPEAKER}</button>`}
         </div>
         <span class="muted small">${quiz.mode === "choose" ? "Wähle die richtige Übersetzung" : "Schreibe die Übersetzung"}</span>
       </div>
@@ -1315,6 +1342,7 @@ function renderQuiz(app) {
     <p class="small muted" style="text-align:center">${esc(list.name)} · ${quiz.mode === "choose" ? "Wähle ein Wort" : "Schreibe das Wort"}</p>`;
 
   if (!toFx) { speak(w.f, list.lang, $("#askWord"), SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.f, list.lang, $("#askWord")); }
+  else if (quiz.readAsk) { speak(w.d, "de-CH", null, SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.d, "de-CH"); }
   if (quiz.mode === "choose") {
     app.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
       if (quiz.answered) return;
@@ -1366,8 +1394,9 @@ function answer(result) {
     sfxWrong();
   }
   quiz.xp += gained + bonus;
-  // Nach einem Fehler geht es erst weiter, wenn das Wort vorgelesen ist. Meldet der Browser das Ende nie, gibt eine Zeitgrenze den Knopf frei.
-  quiz.heard = ok;
+  // Beim Wählen und mit «Wort vorlesen lassen» immer, beim Schreiben nur nach einem Fehler: weiter erst, wenn das Wort vorgelesen ist.
+  // Meldet der Browser das Ende nie, gibt eine Zeitgrenze den Knopf frei.
+  quiz.heard = ok && quiz.mode === "write" && !quiz.readAsk;
   const unlock = () => {
     clearTimeout(unlockTimer);
     if (quiz.heard || view.name !== "quiz" || quiz.current !== wi || !quiz.answered) return;
@@ -1379,7 +1408,10 @@ function answer(result) {
   setTimeout(() => speak(w.f, list.lang, $("#solWord"), SPEAK_PAUSE, unlock));
 
   const head = ok ? pick(PRAISE) : result === "almost" ? "Fast! Achte auf die Schreibweise." : pick(COMFORT);
-  $("#fb").innerHTML = `<div class="feedback ${ok ? "right" : "wrong"}">
+  // Richtig: ein Balken unter den Antworten. Falsch: ein Fenster in der Mitte, damit das richtige Wort im Vordergrund steht.
+  const fb = $("#fb");
+  fb.classList.toggle("pop", !ok);
+  if (ok) fb.innerHTML = `<div class="feedback right">
       <div class="stack" style="gap:2px;min-width:0">
         <strong>${head}</strong>
         <span class="who">${esc(w.d)} = <span class="sol" id="solWord">${sylHTML(w.f, list.lang)}</span></span>
@@ -1387,7 +1419,17 @@ function answer(result) {
       <div class="row">
         ${gained ? `<span class="gain">+${gained}${bonus ? ` <em>+${bonus} Serie!</em>` : ""}</span>` : ""}
         <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
-        ${quiz.mode === "choose" ? `<button class="primary" id="nextBtn" ${ok ? "" : "disabled"}>Weiter</button>` : ""}
+        ${quiz.mode === "choose" ? `<button class="primary" id="nextBtn" ${quiz.heard ? "" : "disabled"}>Weiter</button>` : ""}
+      </div></div>`;
+  else fb.innerHTML = `<div class="feedback wrong pop-card" role="dialog" aria-modal="true" aria-labelledby="popHead">
+      <strong id="popHead">${head}</strong>
+      <div class="pop-words">
+        <span class="pop-de">${esc(w.d)}</span>
+        <span class="sol" id="solWord">${sylHTML(w.f, list.lang)}</span>
+      </div>
+      <div class="row" style="justify-content:center">
+        <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
+        <button class="primary" id="nextBtn" ${quiz.heard ? "" : "disabled"}>Weiter</button>
       </div></div>`;
   $("#hudXp").textContent = quiz.xp;
   const hc = $("#hudCombo");
@@ -1397,7 +1439,7 @@ function answer(result) {
   $("#sayAgain").onclick = () => speak(w.f, list.lang, $("#solWord"), 0, unlock);
   $("#nextBtn")?.addEventListener("click", next);
   if ($("#check")) $("#check").disabled = !quiz.heard;
-  if (ok) ($("#nextBtn") || $("#check"))?.focus();
+  if (quiz.heard) ($("#nextBtn") || $("#check"))?.focus();
 }
 function next() {
   if (quiz.answered && !quiz.heard) return;
@@ -1422,12 +1464,13 @@ function finishQuiz() {
   if (perfect) s.perfect++;
   s.lastDay = today();
   // Nur ganze Durchgänge zählen, «Nur schwierige» nicht. Neu setzen, damit die Liste in der Reihenfolge ans Ende rückt.
-  let timesDone = 0;
-  if (quiz.total === list.words.length) {
-    timesDone = (s.listRounds[list.id] || 0) + 1;
-    delete s.listRounds[list.id];
-    s.listRounds[list.id] = timesDone;
-  }
+  const count = [...listCount(list.id)];
+  if (quiz.total === list.words.length) count[0]++;
+  if (quiz.mode === "choose") count[1]++;
+  if (quiz.readAsk) count[2]++;
+  delete s.listRounds[list.id];
+  s.listRounds[list.id] = count;
+  const timesDone = quiz.total === list.words.length ? count[0] : 0;
   quiz.result = { perfect, timesDone, record: quiz.prevBest > 0 && quiz.xp > quiz.prevBest, levelUp: levelOf(profile.xp) > quiz.startLevel, fresh: checkBadges(), stars: listStars(list) };
   if (!list.example) persistList(list);
   persistProfile();
@@ -1446,10 +1489,13 @@ function renderDone(app) {
       <span class="score">+${quiz.xp}</span>
       <span class="muted">Punkte in dieser Runde${r.perfect ? " (inklusive 20 Bonuspunkte für eine Runde ohne Fehler)" : ""}</span>
       <div class="tally">
-        <div><span class="label">Dieser Voci-Satz</span><b>${list.points}</b><span class="small muted">${r.record ? `Neuer Rekord! Vorher ${quiz.prevBest}` : `Rekord pro Runde: ${list.best}`}</span></div>
+        <div><span class="label">Dieser Voci-Satz</span><b>${int(list.points)}</b><span class="small muted">${r.record ? `Neuer Rekord! Vorher ${int(quiz.prevBest)}` : `Rekord pro Runde: ${int(list.best)}`}</span></div>
         <div><span class="label">Total alle Listen</span><b>${profile.xp}</b><span class="small muted">Level ${lvl}</span></div>
       </div>
       <p class="big-praise">${r.perfect ? "Alles beim ersten Versuch gewusst. Wahnsinn!" : pct >= 75 ? "Sehr gut! Noch ein paar Wörter üben, dann sitzt die Liste." : pct >= 40 ? "Gut gemacht! Jede Runde bringt dich weiter." : "Toll, dass du übst! Die schwierigen Wörter gleich nochmals?"}</p>
+      ${quiz.mode === "choose" ? `<div class="status info write-offer"><strong>${chooseLeft(list.id) ? "Möchtest du die Liste jetzt schreiben?" : "Wählen ist für diese Liste geschafft!"}</strong>
+        ${chooseLeft(list.id) ? `Wählen geht bei dieser Liste noch ${chooseLeft(list.id) === 1 ? "1 Mal" : `${chooseLeft(list.id)} Mal`}.` : "Ab jetzt schreibst du die Wörter."}
+        <div class="row" style="justify-content:center;margin-top:8px"><button class="primary" id="writeNow">Jetzt schreiben</button></div></div>` : ""}
       ${r.timesDone && r.timesDone % 5 === 0 ? `<div class="status ok"><strong>Schon ${r.timesDone} Mal ganz durch diese Liste!</strong> So bleiben die Wörter im Kopf.</div>` : ""}
       <div class="row" style="justify-content:center;gap:18px">
         <span class="inline-stat"><b>${first}/${total}</b>&nbsp;beim ersten Versuch</span>
@@ -1480,8 +1526,9 @@ function renderDone(app) {
   }
   app.querySelectorAll("[data-say]").forEach(b => b.onclick = () => speak(hard[+b.dataset.say].f, list.lang, $("#hw" + b.dataset.say)));
   $("#editList")?.addEventListener("click", () => go({ name: "edit", list: JSON.parse(JSON.stringify(list)), isNew: false }));
-  $("#againHard")?.addEventListener("click", () => { quiz = newQuiz(list.id, [...quiz.missed]); go({ name: "quiz" }); });
+  $("#againHard")?.addEventListener("click", () => { quiz = newQuiz(list.id, [...quiz.missed], quiz.mode); go({ name: "quiz" }); });
   $("#againAll").onclick = () => startQuiz(list.id, false);
+  $("#writeNow")?.addEventListener("click", () => startQuiz(list.id, false, "write"));
   $("#home").onclick = () => go({ name: "home" });
 }
 
@@ -1531,9 +1578,12 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 
 // Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
 const NEWS = {
-  id: "2026-11-07",
+  id: "2026-11-08",
   items: [
-    "Nach einem Fehler geht es erst weiter, wenn du das Wort gehört hast.",
+    "Beim Wählen und mit «Wort vorlesen lassen» geht es erst weiter, wenn du das Wort gehört hast. Beim Schreiben nur nach einem Fehler.",
+    "Neue Option «Wort vorlesen lassen» und nach dem Wählen die Frage, ob du die Liste schreiben möchtest.",
+    "«Wähle ein Wort» geht pro Liste 5 Runden, Vorlesen hilft in den ersten 3. Danach schreibst und liest du selbst.",
+    "Bei einem Fehler zeigt ein Fenster das richtige Wort gross an.",
     "Auf dem Tablet quer nutzt die App jetzt den ganzen Bildschirm.",
     "Die Texterkennung liest auch quer oder schief fotografierte Blätter."
   ]

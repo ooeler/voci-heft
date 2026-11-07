@@ -138,7 +138,7 @@ input[type=text], select {
 .feedback { border-radius: 8px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .feedback.right { background: var(--green-soft); color: var(--green); }
 .feedback.wrong { background: var(--red-soft); color: var(--red); }
-.feedback .sol { font-family: var(--display); font-weight: 800; font-size: 1.25rem; overflow-wrap: anywhere; }
+.feedback .sol { font-family: var(--display); font-weight: 800; font-size: 1.6rem; overflow-wrap: anywhere; }
 .feedback .who { color: var(--ink); }
 .speak { border-radius: 999px; width: 44px; padding: 0; color: var(--blue); }
 .speak svg { width: 22px; height: 22px; }
@@ -265,3 +265,12 @@ body.maint-open { overflow: hidden; }
 }
 #news { z-index: 90; }
 .news-list { text-align: left; margin: 8px 0 12px; padding-left: 1.3em; display: grid; gap: 6px; }
+
+/* Nach einem Fehler: das richtige Wort gross in einem Fenster */
+#fb.pop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgba(15, 20, 35, .45); }
+.pop-card { width: 100%; max-width: 520px; flex-direction: column; align-items: center; text-align: center; gap: 16px; padding: 24px 20px;
+  background: var(--card); border: 2px solid var(--red); border-radius: 14px; box-shadow: 0 16px 40px rgba(0, 0, 0, .25); }
+.pop-card > strong { font-size: 1.1rem; }
+.pop-words { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--ink); }
+.pop-de { font-size: 1.3rem; color: var(--muted); overflow-wrap: anywhere; }
+.pop-card .sol { font-size: clamp(2rem, 8vw, 2.8rem); color: var(--ink); }

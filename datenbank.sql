@@ -76,3 +76,18 @@ drop policy if exists "eigenes Profil ändern" on public.profiles;
 create policy "eigenes Profil lesen"   on public.profiles for select to authenticated using ((select auth.uid()) = user_id);
 create policy "eigenes Profil anlegen" on public.profiles for insert to authenticated with check ((select auth.uid()) = user_id);
 create policy "eigenes Profil ändern"  on public.profiles for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+-- Höchstens 200 Listen pro Konto, damit niemand mit einem offenen Konto die Datenbank füllt.
+create or replace function public.listen_grenze() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  -- Die App speichert per Upsert: Bestehende Listen dürfen immer aktualisiert werden
+  if exists (select 1 from public.lists where user_id = new.user_id and id = new.id) then return new; end if;
+  if (select count(*) from public.lists where user_id = new.user_id) >= 200 then
+    raise exception 'Zu viele Listen (höchstens 200 pro Konto)' using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+revoke all on function public.listen_grenze() from public, anon, authenticated;
+drop trigger if exists listen_grenze on public.lists;
+create trigger listen_grenze before insert on public.lists for each row execute function public.listen_grenze();

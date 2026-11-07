@@ -1,9 +1,14 @@
+# Updates kommen wöchentlich und werden automatisch übernommen (siehe .github/workflows/updates.yml).
+# cooldown: neue Versionen erst nach einigen Tagen nehmen. Gekaperte Releases werden meist in dieser Zeit zurückgezogen.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     groups:
       bibliotheken:
         patterns: ["*"]
@@ -12,15 +17,20 @@ updates:
     directory: /qa
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     groups:
       testwerkzeuge:
         patterns: ["*"]
         update-types: [minor, patch]
+  # Alle Actions in einem PR, damit nie zwei PRs gleichzeitig dieselbe Workflow-Datei ändern
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
     groups:
       actions:
         patterns: ["*"]
-        update-types: [minor, patch]
