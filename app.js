@@ -1527,12 +1527,30 @@ function renderQuiz(app) {
       inp.classList.add(r === "right" ? "right" : "wrong");
       $("#check").textContent = "Weiter";
       $("#hintBtn").disabled = true;
-      answer(r);
+      answer(r, inp.value);
     };
   }
 }
 
-function answer(result) {
+// Eingabe mit der richtigen Schreibweise vergleichen: falsche oder überzählige Buchstaben rot, fehlende als roter Strich
+function diffHTML(typed, target) {
+  const parts = String(target).split(/s*[/;,]s*/).map(p => p.replace(/(.*?)/g, "").trim()).filter(Boolean);
+  const t = typed.trim(), best = parts.reduce((x, p) => lev(t.toLowerCase(), p.toLowerCase()) < lev(t.toLowerCase(), x.toLowerCase()) ? p : x, parts[0] || "");
+  const a = [...t], b = [...best], al = a.map(c => c.toLowerCase()), bl = b.map(c => c.toLowerCase());
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (al[i - 1] === bl[j - 1] ? 0 : 1));
+  const out = [];
+  for (let i = a.length, j = b.length; i > 0 || j > 0;) {
+    if (i > 0 && j > 0 && al[i - 1] === bl[j - 1] && d[i][j] === d[i - 1][j - 1]) { out.push(esc(a[--i])); j--; }
+    else if (i > 0 && j > 0 && d[i][j] === d[i - 1][j - 1] + 1) { out.push(`<span class="bad">${esc(a[--i])}</span>`); j--; }
+    else if (i > 0 && d[i][j] === d[i - 1][j] + 1) out.push(`<span class="bad">${esc(a[--i])}</span>`);
+    else { out.push(`<span class="miss" title="Hier fehlt ein Buchstabe">_</span>`); j--; }
+  }
+  return out.reverse().join("");
+}
+function answer(result, typed) {
   const list = getList(quiz.listId), wi = quiz.current, w = list.words[wi];
   quiz.answered = true;
   const ok = result === "right", hinted = ok && quiz.hint > 0;
@@ -1595,6 +1613,8 @@ function answer(result) {
         <span class="pop-de">${esc(w.d)}</span>
         <span class="sol" id="solWord">${sylHTML(w.f, list.lang)}</span>
       </div>
+      ${typed != null ? `<div class="pop-typed"><span class="label">Deine Eingabe</span>
+        <span class="typed">${diffHTML(typed, quiz.mode === "dictation" || prefs.dir === "de-fx" ? w.f : w.d)}</span></div>` : ""}
       <div class="row" style="justify-content:center">
         <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
         ${speakBackBtn()}
@@ -1748,8 +1768,9 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 
 // Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
 const NEWS = {
-  id: "2026-11-11",
+  id: "2026-11-12",
   items: [
+    "Bei einem Fehler siehst du deine Eingabe, die falschen Buchstaben sind rot markiert.",
     "Bei richtigen Antworten gibt es fröhliche Emojis.",
     "Tipp beim Schreiben: Pro Klick kommt ein Buchstabe dazu, danach 5 Sekunden warten. Mit Tipp kommt das Wort gleich nochmals.",
     "Wörterbox: Jedes Wort kommt nach 1, 3, 7, 14 und 30 Tagen wieder. Unter «Heute fällig» siehst du, was dran ist.",

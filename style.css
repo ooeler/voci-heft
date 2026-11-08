@@ -298,3 +298,9 @@ body.maint-open { overflow: hidden; }
   100% { transform: translateY(-170px) scale(1); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .cheer span { opacity: 1; } }
+
+/* Eigene Eingabe nach einem Fehler */
+.pop-typed { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.typed { font-family: var(--display); font-size: 1.5rem; font-weight: 700; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.typed .bad { color: var(--red); text-decoration: underline wavy var(--red); text-underline-offset: 4px; }
+.typed .miss { color: var(--red); }
