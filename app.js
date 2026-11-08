@@ -1426,7 +1426,7 @@ function checkTyped(input, target) {
 }
 
 const MODE_NAMES = { choose: "Wähle ein Wort", write: "Schreibe das Wort", dictation: "Diktat" };
-const HINT_WAIT = 3;
+const HINT_WAIT = 5;
 // Erste Schreibweise ohne Zusätze in Klammern, Buchstaben noch nicht gezeigter Stellen als Strich
 const hintWord = sol => String(sol).split(/\s*[\/;,]\s*/)[0].replace(/\(.*?\)/g, "").trim();
 function hintText(sol, n) {
@@ -1751,7 +1751,7 @@ const NEWS = {
   id: "2026-11-11",
   items: [
     "Bei richtigen Antworten gibt es fröhliche Emojis.",
-    "Tipp beim Schreiben: Pro Klick kommt ein Buchstabe dazu, danach 3 Sekunden warten. Mit Tipp kommt das Wort gleich nochmals.",
+    "Tipp beim Schreiben: Pro Klick kommt ein Buchstabe dazu, danach 5 Sekunden warten. Mit Tipp kommt das Wort gleich nochmals.",
     "Wörterbox: Jedes Wort kommt nach 1, 3, 7, 14 und 30 Tagen wieder. Unter «Heute fällig» siehst du, was dran ist.",
     "Neuer Modus «Diktat»: Du hörst das Wort und schreibst es.",
     "Tages-Serie: Lerne jeden Tag, ein freier Tag pro Woche ist erlaubt.",
