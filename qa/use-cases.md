@@ -16,6 +16,7 @@ Diese Datei beschreibt, was die App aus Sicht der Benutzer können muss. Alles a
 - **B1 Modus „Wähle ein Wort“:** Die App zeigt ein Wort und mehrere Antworten. Richtig und falsch werden sofort angezeigt.
 - **B2 Modus „Schreibe das Wort“:** Das Kind tippt die Antwort ein. Bei Fremdsprachen gibt es Knöpfe für Sonderzeichen, wo sie nötig sind.
 - **B2a Tipp:** Beim Schreiben und beim Diktat zeigt «Tipp» pro Klick einen Buchstaben mehr, danach ist der Knopf 5 Sekunden gesperrt. Ist das Wort mit Tipp richtig, gibt es keine Punkte und das Wort kommt sofort nochmals ohne Tipp.
+- **B2b Eigene Eingabe:** Nach einer falschen Antwort beim Schreiben oder im Diktat zeigt das Fenster auch «Deine Eingabe». Falsche oder überzählige Buchstaben sind rot markiert, fehlende als roter Strich.
 - **B3 Richtung:** „Deutsch → Fremdsprache“ und „Fremdsprache → Deutsch“ funktionieren beide. Die Einstellung wirkt auf die nächste Runde.
 - **B4 Falsche Wörter kommen wieder:** Ein falsch beantwortetes Wort kommt in derselben Runde nochmals. Die Runde endet erst, wenn alle Wörter einmal richtig waren.
 - **B5 Vorlesen und Silben:** Das richtige Fremdwort wird nach der Antwort vorgelesen und in Silben getrennt angezeigt, zum Beispiel „de·li·cious“ oder „la fe·nê·tre“. In der Testumgebung gibt es vermutlich keinen Ton. Prüfe die Anzeige, nicht den Ton.
