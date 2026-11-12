@@ -4,7 +4,7 @@
   "description": "Werkzeuge für den Black-Box-Tester",
   "type": "module",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.318",
+    "@anthropic-ai/claude-code": "2.1.319",
     "@playwright/mcp": "0.0.84"
   }
 }
