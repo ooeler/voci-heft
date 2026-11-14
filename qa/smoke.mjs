@@ -20,7 +20,8 @@ try {
 
   await page.getByRole("button", { name: "Ohne Konto ausprobieren" }).click();
   await page.getByRole("button", { name: "Lernen", exact: true }).first().click();
-  await page.locator("[data-opt]").first().click();
+  await page.locator("[data-tile]").first().click();
+  await page.locator("#checkTiles").click();
   await page.locator("#fb .feedback").waitFor();
   step("Anmeldeseite, Übersicht und eine Quizfrage");
 

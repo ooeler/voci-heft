@@ -304,3 +304,14 @@ body.maint-open { overflow: hidden; }
 .typed { font-family: var(--display); font-size: 1.5rem; font-weight: 700; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .typed .bad { color: var(--red); text-decoration: underline wavy var(--red); text-underline-offset: 4px; }
 .typed .miss { color: var(--red); }
+
+/* Wähle ein Wort: Silben-Puzzle */
+.puzzle { display: flex; flex-direction: column; gap: 14px; }
+.built { min-height: 64px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; padding: 8px; border: 2px dashed var(--line); border-radius: 10px; }
+.built.right { border-color: var(--green); background: var(--green-soft); }
+.built.wrong { border-color: var(--red); background: var(--red-soft); }
+.tiles { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.tile { min-height: 52px; min-width: 52px; font-size: 1.25rem; font-family: var(--display); padding: 8px 14px; }
+.tile:disabled { opacity: .3; }
+.built .tile.on { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.built .tile.gap { margin-left: 14px; }
