@@ -66,7 +66,7 @@ const int = (v, max = 1e9) => Math.min(max, Math.max(0, Math.floor(Number(v)) ||
 const str = (v, max) => (typeof v === "string" ? v : "").slice(0, max);
 function normalizeList(l) {
   if (!l || typeof l !== "object" || !ID_RE.test(String(l.id)) || !Array.isArray(l.words)) return null;
-  return {
+  const out = {
     id: String(l.id),
     name: str(l.name, MAX_NAME),
     lang: LANGS.some(x => x[0] === l.lang) ? l.lang : "",
@@ -74,6 +74,8 @@ function normalizeList(l) {
       .map(w => ({ d: str(w.d, MAX_TEXT), f: str(w.f, MAX_TEXT), ok: int(w.ok, 1e6), ko: int(w.ko, 1e6), box: int(w.box, 5), due: int(w.due, 1e6) })),
     points: int(l.points), best: int(l.best)
   };
+  while (out.words.length && JSON.stringify(out.words).length > 300000) out.words.pop();
+  return out;
 }
 function normalizeProfile(p) {
   const out = emptyProfile();
@@ -129,7 +131,10 @@ async function flush() {
       const l = normalizeList(lists.find(x => x.id === id));
       if (l) {
         const { error } = await sb.from("lists").upsert({ ...l, user_id: user.id, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
-        if (error) throw error;
+        // Von der Datenbank abgelehnt (zu gross, zu viele Listen): diese Liste überspringen, die anderen weiter speichern
+        if (error && ["23514", "P0001", "22001", "54000"].includes(error.code)) {
+          toast(`<div><strong>«${esc(l.name || "Liste")}» liess sich nicht speichern.</strong><br><span>Sie bleibt nur auf diesem Gerät.</span></div>`);
+        } else if (error) throw error;
       }
       pending.lists = pending.lists.filter(x => x !== id);
     }
@@ -163,7 +168,7 @@ const xpNeed = n => 50 * n * (n - 1);                    // Level 1: 0, Level 2:
 const levelOf = xp => { let n = 1; while (xp >= xpNeed(n + 1)) n++; return n; };
 const levelName = n => LEVEL_NAMES[Math.min(n - 1, LEVEL_NAMES.length - 1)];
 const levelPct = xp => { const n = levelOf(xp); return Math.round((xp - xpNeed(n)) / (xpNeed(n + 1) - xpNeed(n)) * 100); };
-const known = w => w.ok > 0 && w.ok >= w.ko;
+const known = w => w.ok > w.ko;
 // Wählen ist eine Hilfe für den Anfang: pro Liste 5 Runden, danach wird geschrieben. Vorlesen hilft in den ersten 3 Runden.
 const MAX_CHOOSE = 5, MAX_READ = 3;
 const listCount = id => Object.hasOwn(profile.stats.listRounds, id) ? profile.stats.listRounds[id] : [0, 0, 0];
@@ -575,7 +580,19 @@ function bindInstall(root) {
 
 /* ---------- Ansichten ---------- */
 let view = { name: "loading" };
-function go(v) { stopSpeak(); view = v; render(); window.scrollTo({ top: 0 }); if (updateReady && !busy()) applyUpdate(); }
+const GUEST = { id: "lokal", name: "Gast", local: true };
+// Ausserhalb der Übersicht gibt es einen eigenen Verlaufseintrag. So führt die Zurück-Taste zur Übersicht statt aus der App.
+window.addEventListener("popstate", () => {
+  if (!user || ["home", "login", "loading"].includes(view.name)) return;
+  if (leaveEdit()) go({ name: "home" }); else history.pushState({ voci: 1 }, "");
+});
+function go(v) {
+  if (user && !["home", "login", "loading"].includes(v.name) && !history.state?.voci) history.pushState({ voci: 1 }, "");
+  stopSpeak(); view = v; render(); window.scrollTo({ top: 0 }); if (updateReady && !busy()) applyUpdate(); }
+// Beim Bearbeiten mit ungespeicherten Änderungen zuerst fragen
+function leaveEdit() {
+  return view.name !== "edit" || !view.dirty || confirm("Die Liste ist noch nicht gespeichert. Trotzdem zurück zu den Listen?");
+}
 function render() {
   const app = $("#app");
   app.dataset.view = view.name;
@@ -586,7 +603,7 @@ function render() {
   else top.innerHTML = `<button class="ghost" id="backHome">← Zu den Listen</button>`;
   $("#newScan")?.addEventListener("click", () => go({ name: "edit", list: { id: uid(), name: "", lang: "", words: [] }, isNew: true }));
   $("#openSettings")?.addEventListener("click", () => go({ name: "settings" }));
-  $("#backHome")?.addEventListener("click", () => go({ name: "home" }));
+  $("#backHome")?.addEventListener("click", () => { if (leaveEdit()) go({ name: "home" }); });
   ({ loading: a => a.innerHTML = `<p class="muted" style="text-align:center"><span class="spinner"></span></p>`,
      login: renderLogin, recover: renderRecover, home: renderHome, edit: renderEdit, quiz: renderQuiz, done: renderDone, settings: renderSettings, parents: renderParents })[view.name](app);
 }
@@ -623,7 +640,7 @@ function renderLogin(app) {
     </details>`}`;
   bindInstall(app);
   app.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => go({ name: "login", tab: b.dataset.tab }));
-  $("#tryLocal").onclick = () => startSession({ id: "lokal", name: "Gast", local: true });
+  $("#tryLocal").onclick = () => { lsSet("voci-heft-guest", true); startSession(GUEST); };
   const st = (k, h) => $("#authStatus").innerHTML = `<div class="status ${k}">${h}</div>`;
   $("#forgot")?.addEventListener("click", async () => {
     const email = $("#aemail").value.trim();
@@ -756,7 +773,7 @@ function renderHome(app) {
           </div>
           ${prefs.mode === "choose" || prefs.readAsk ? `<span class="small muted">${[
             prefs.mode === "choose" ? (chooseLeft(l.id) ? `Wählen noch ${chooseLeft(l.id)} Mal` : "Wählen geschafft, jetzt wird geschrieben") : "",
-            prefs.readAsk ? (readLeft(l.id) ? `Vorlesen noch ${readLeft(l.id)} Mal` : "Vorlesen aufgebraucht, jetzt liest du selbst") : ""
+            prefs.readAsk && prefs.mode !== "dictation" ? (readLeft(l.id) ? `Vorlesen noch ${readLeft(l.id)} Mal` : "Vorlesen aufgebraucht, jetzt liest du selbst") : ""
           ].filter(Boolean).join(" · ")}</span>` : ""}
         </article>`;
       }).join("")}
@@ -803,7 +820,7 @@ function renderSettings(app) {
         <input type="range" id="rate" min="0.6" max="1.2" step="0.05" value="${Number(prefs.rate) || 0.9}">
       </div>
       <div class="voice-pick" id="voicePick"></div>
-      <p class="small muted">Die Stimmen kommen von deinem Gerät. Die App nimmt automatisch die beste und merkt sich hier deine Wahl. Klingt alles blechern, kannst du in den Einstellungen des Geräts bessere Stimmen laden. Am iPhone geht das unter Bedienungshilfen, Gesprochene Inhalte, Stimmen.</p>
+      <p class="small muted">Die Stimmen kommen von deinem Gerät. Die App nimmt automatisch die beste und merkt sich hier deine Wahl. Klingt alles blechern, kannst du in den Einstellungen des Geräts bessere Stimmen laden. Am iPhone geht das unter Bedienungshilfen, Gesprochene Inhalte, Stimmen. Online-Stimmen (zum Beispiel «Google» oder «Online») schicken die Wörter zum Vorlesen an den Anbieter.</p>
       <label class="row" style="gap:8px"><input type="checkbox" id="sound" ${prefs.sound ? "checked" : ""}> Klänge bei richtigen und falschen Antworten</label>
       ${SpeechRec ? `<label class="row" style="gap:8px"><input type="checkbox" id="speakBackOn" ${prefs.speakBack ? "checked" : ""}> Nachsprechen üben (Mikrofon)</label>
       <p class="small muted">Nach jeder Antwort kann das Kind das Wort ins Mikrofon sprechen. Die Erkennung macht der Browser: Chrome schickt die Aufnahme dafür an Google, Safari an Apple.</p>` : ""}
@@ -829,7 +846,11 @@ function renderSettings(app) {
     </section>`;
   bindInstall(app);
   $("#logout").onclick = async () => {
-    if (!user.local && sb) { await flush(); await sb.auth.signOut(); }
+    if (!user.local && sb) {
+      await flush();
+      if (!pending.lists.length && !pending.deleted.length && !pending.profile) try { localStorage.removeItem(cacheKey()); } catch {}
+      await sb.auth.signOut();
+    } else lsSet("voci-heft-guest", false);
     user = null; go({ name: "login" });
   };
   $("#rate").oninput = e => { prefs.rate = +e.target.value; savePrefs(); };
@@ -863,7 +884,7 @@ function renderSettings(app) {
         return;
       }
       for (const l of incoming) { const i = lists.findIndex(x => x.id === l.id); if (i >= 0) lists[i] = l; else lists.push(l); persistList(l); }
-      $("#backupStatus").innerHTML = `<div class="status ok">${incoming.length} Listen geladen.</div>`;
+      $("#backupStatus").innerHTML = `<div class="status ok">${incoming.length === 1 ? "1 Liste" : `${incoming.length} Listen`} geladen.</div>`;
     } catch {
       $("#backupStatus").innerHTML = `<div class="status err">Diese Datei ist keine Voci-Heft-Sicherung.</div>`;
     }
@@ -973,14 +994,14 @@ function renderEdit(app, keepStatus) {
     </section>`;
 
   if (keepStatus && view.status) setStatus(view.status.kind, view.status.html);
-  $("#lname").oninput = e => L.name = e.target.value;
+  $("#lname").oninput = e => { L.name = e.target.value; view.dirty = true; };
   $("#llang").onchange = e => { L.lang = e.target.value; $("#fxHead").textContent = L.lang ? langName(L.lang) : "Fremdsprache"; };
   $("#pairs").oninput = e => {
     const t = e.target; if (!t.dataset.k) return;
-    L.words[+t.dataset.i][t.dataset.k] = t.value;
+    L.words[+t.dataset.i][t.dataset.k] = t.value; view.dirty = true;
     $("#saveList").disabled = L.words.filter(w => w.d.trim() && w.f.trim()).length < 2;
   };
-  app.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { L.words.splice(+b.dataset.del, 1); renderEdit(app, true); });
+  app.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { L.words.splice(+b.dataset.del, 1); view.dirty = true; renderEdit(app, true); });
   $("#addRow").onclick = () => { L.words.push({ d: "", f: "", ok: 0, ko: 0 }); renderEdit(app, true); $("#d" + (L.words.length - 1))?.focus(); };
   $("#swapAll")?.addEventListener("click", () => { L.words = L.words.map(w => ({ ...w, d: w.f, f: w.d })); renderEdit(app, true); });
   const addFiles = files => {
@@ -996,6 +1017,8 @@ function renderEdit(app, keepStatus) {
   $("#clearPhotos")?.addEventListener("click", () => { view.photos = []; renderEdit(app); });
   $("#scan")?.addEventListener("click", () => useClaude ? scanWithClaude() : scanOnDevice());
   $("#saveList").onclick = () => {
+    if (view.isNew && lists.length >= MAX_LISTS) { setStatus("err", `Mehr als ${MAX_LISTS} Listen gehen nicht. Lösche zuerst eine alte Liste.`); return; }
+    view.dirty = false;
     L.words = L.words.map(w => ({ ...w, d: w.d.trim(), f: w.f.trim() })).filter(w => w.d && w.f);
     if (!L.lang) L.lang = "en-GB";
     if (!L.name.trim()) L.name = langName(L.lang) + " " + new Date().toLocaleDateString("de-CH");
@@ -1104,6 +1127,7 @@ async function scanOnDevice() {
     }
     view.newFrom = L.words.length;
     const added = addPairs(pairs);
+    if (added) view.dirty = true;
     view.photos = [];
     view.status = { kind: "ok", html: `${added} Wörter erkannt und unten gelb markiert. Tippe auf ein Wort, um es zu korrigieren, und speichere dann die Liste.${rawBox(text)}` };
     renderEdit($("#app"), true);
@@ -1370,6 +1394,7 @@ Lies alle Wortpaare heraus, in der Reihenfolge auf der Seite. "de" ist immer das
     if (!L.name && res.title) L.name = res.title;
     view.newFrom = L.words.length;
     const added = addPairs(pairs);
+    if (added) view.dirty = true;
     view.photos = [];
     view.status = { kind: "ok", html: `${added} Wörter erkannt (${esc(langName(L.lang))}) und unten gelb markiert. Tippe auf ein Wort, um es zu korrigieren, und speichere dann die Liste.` };
     renderEdit($("#app"), true);
@@ -1570,7 +1595,7 @@ function renderQuiz(app) {
 
 // Eingabe mit der richtigen Schreibweise vergleichen: falsche oder überzählige Buchstaben rot, fehlende als roter Strich
 function diffHTML(typed, target) {
-  const parts = String(target).split(/s*[/;,]s*/).map(p => p.replace(/(.*?)/g, "").trim()).filter(Boolean);
+  const parts = String(target).split(/\s*[\/;,]\s*/).map(p => p.replace(/\(.*?\)/g, "").trim()).filter(Boolean);
   const t = typed.trim(), best = parts.reduce((x, p) => lev(t.toLowerCase(), p.toLowerCase()) < lev(t.toLowerCase(), x.toLowerCase()) ? p : x, parts[0] || "");
   const a = [...t], b = [...best], al = a.map(c => c.toLowerCase()), bl = b.map(c => c.toLowerCase());
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -1588,7 +1613,7 @@ function diffHTML(typed, target) {
 }
 function answer(result, typed) {
   const list = getList(quiz.listId), wi = quiz.current, w = list.words[wi];
-  quiz.answered = true;
+  quiz.answered = true; quiz.answeredAt = Date.now();
   const ok = result === "right", hinted = ok && quiz.hint > 0;
   let gained = 0, bonus = 0;
   if (hinted) {
@@ -1603,7 +1628,7 @@ function answer(result, typed) {
     quiz.combo++; quiz.correct++;
     quiz.bestCombo = Math.max(quiz.bestCombo, quiz.combo);
     if (quiz.combo % 5 === 0) bonus = 10;
-    if (!quiz.missed.has(wi)) { w.box = Math.min(5, (w.box || 0) + 1); w.due = today() + BOX_DAYS[w.box]; }
+    if (!quiz.missed.has(wi) && isDue(w)) { w.box = Math.min(5, (w.box || 0) + 1); w.due = today() + BOX_DAYS[w.box]; }
     w.ok++; quiz.queue.shift(); quiz.done++;
     sfxRight(); cheer();
   } else {
@@ -1615,6 +1640,8 @@ function answer(result, typed) {
     sfxWrong();
   }
   quiz.xp += gained + bonus;
+  $(".progress .count").textContent = `${quiz.done} / ${quiz.total}`;
+  $(".progress .bar > i").style.width = Math.round(quiz.done / quiz.total * 100) + "%";
   // Beim Wählen und mit «Wort vorlesen lassen» immer, beim Schreiben nur nach einem Fehler: weiter erst, wenn das Wort vorgelesen ist.
   // Meldet der Browser das Ende nie, gibt eine Zeitgrenze den Knopf frei.
   quiz.heard = ok && quiz.mode !== "choose" && !quiz.readAsk;
@@ -1650,7 +1677,7 @@ function answer(result, typed) {
         <span class="sol" id="solWord">${sylHTML(w.f, list.lang)}</span>
       </div>
       ${typed != null ? `<div class="pop-typed"><span class="label">Deine Eingabe</span>
-        <span class="typed">${diffHTML(typed, quiz.mode === "dictation" || prefs.dir === "de-fx" ? w.f : w.d)}</span></div>` : ""}
+        <span class="typed">${diffHTML(typed, quiz.mode !== "write" || prefs.dir === "de-fx" ? w.f : w.d)}</span></div>` : ""}
       <div class="row" style="justify-content:center">
         <button class="speak big" id="sayAgain" aria-label="Nochmals vorlesen">${SPEAKER}</button>
         ${speakBackBtn()}
@@ -1668,6 +1695,7 @@ function answer(result, typed) {
   if (quiz.heard) ($("#nextBtn") || $("#check"))?.focus();
 }
 function next() {
+  if (Date.now() - (quiz.answeredAt || 0) < 600) return; // zweiter Klick eines Doppelklicks
   if (quiz.answered && !quiz.heard) return;
   stopSpeak(); renderQuiz($("#app"));
 }
@@ -1847,7 +1875,7 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   }).catch(() => {});
 }
 (async () => {
-  if (!sb) { go({ name: "login" }); return; }
+  if (!sb) { if (lsGet("voci-heft-guest", false)) startSession(GUEST); else go({ name: "login" }); return; }
   sb.auth.onAuthStateChange((event, session) => {
     if (event === "PASSWORD_RECOVERY") { if (session) { user = userFrom(session.user); startSession(user); } go({ name: "recover" }); return; }
     if (event === "SIGNED_IN" && session && (!user || user.id !== session.user.id)) startSession(userFrom(session.user));
@@ -1855,5 +1883,6 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   });
   const { data } = await sb.auth.getSession();
   if (data.session) { if (!user) startSession(userFrom(data.session.user)); }
+  else if (lsGet("voci-heft-guest", false)) startSession(GUEST);
   else if (view.name === "loading") go({ name: "login" });
 })();
