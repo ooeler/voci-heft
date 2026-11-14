@@ -721,13 +721,13 @@ function renderHome(app) {
         <div class="row">
           <div class="seg" role="group" aria-label="Lernmodus">
             <button data-mode="choose" aria-pressed="${prefs.mode === "choose"}">Wähle ein Wort</button>
-            <button data-mode="write" aria-pressed="${prefs.mode === "write"}">Schreibe das Wort</button>
             ${"speechSynthesis" in window ? `<button data-mode="dictation" aria-pressed="${prefs.mode === "dictation"}">Diktat</button>` : ""}
+            <button data-mode="write" aria-pressed="${prefs.mode === "write"}">Schreibe das Wort</button>
           </div>
-          <div class="seg" role="group" aria-label="Richtung">
+          ${prefs.mode === "write" ? `<div class="seg" role="group" aria-label="Richtung">
             <button data-dir="de-fx" aria-pressed="${prefs.dir === "de-fx"}">Deutsch → Fremdsprache</button>
             <button data-dir="fx-de" aria-pressed="${prefs.dir === "fx-de"}">Fremdsprache → Deutsch</button>
-          </div>
+          </div>` : `<span class="small muted">${prefs.mode === "choose" ? "Wählen: immer Deutsch → Fremdsprache" : "Diktat: Fremdwort hören und schreiben"}</span>`}
         </div>
         <label class="row" style="gap:8px"><input type="checkbox" id="readAsk" ${prefs.readAsk ? "checked" : ""}> Wort vorlesen lassen</label>
         <p class="small muted">Vorlesen hilft in den ersten ${MAX_READ} Runden einer Liste. «Wähle ein Wort» geht pro Liste ${MAX_CHOOSE} Runden, danach wird geschrieben.</p>
@@ -1425,6 +1425,43 @@ function checkTyped(input, target) {
   return "wrong";
 }
 
+// Wähle ein Wort: Das Fremdwort aus gemischten Silben und Wörtern zusammensetzen.
+// Ein bis zwei Silben aus anderen Wörtern der Liste kommen als falsche Kärtchen dazu.
+function wordTiles(text, lang) {
+  // Bindestrich-Wörter wie quick-tempered zuerst am Bindestrich teilen, der Strich bleibt am ersten Teil
+  const parts = w => w.split(/(?<=-)/).flatMap(part => {
+    const syl = syllabify(part.replace(/-$/, ""), lang);
+    return part.endsWith("-") ? [...syl.slice(0, -1), syl[syl.length - 1] + "-"] : syl;
+  });
+  return hintWord(text).split(/\s+/).filter(Boolean).flatMap((w, k) => parts(w).map((t, i) => ({ t, gap: k > 0 && i === 0 })));
+}
+function puzzleTiles(list, wi) {
+  const own = wordTiles(list.words[wi].f, list.lang), seen = new Set(own.map(x => x.t.toLowerCase()));
+  const pool = shuffle(list.words.filter((_, i) => i !== wi).flatMap(w => wordTiles(w.f, list.lang)).map(x => x.t))
+    .filter(t => !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+  return { own, all: shuffle([...own.map(x => x.t), ...pool.slice(0, own.length >= 4 ? 1 : 2)]) };
+}
+function bindPuzzle(p) {
+  const picked = [], key = t => t.replace(/\s+/g, "").toLowerCase();
+  const update = () => {
+    $("#built").innerHTML = picked.map((i, k) => `<button type="button" class="tile on${p.own[k]?.gap ? " gap" : ""}" data-pick="${k}">${esc(p.all[i])}</button>`).join("")
+      || `<span class="muted small">Tippe die Silben in der richtigen Reihenfolge an.</span>`;
+    $("#tiles").querySelectorAll("[data-tile]").forEach(b => { b.disabled = quiz.answered || picked.includes(+b.dataset.tile); });
+    $("#undoTile").disabled = quiz.answered || !picked.length;
+    $("#checkTiles").disabled = quiz.answered || !picked.length;
+    $("#built").querySelectorAll("[data-pick]").forEach(b => b.onclick = () => { if (!quiz.answered) { picked.splice(+b.dataset.pick, 1); update(); } });
+  };
+  $("#tiles").querySelectorAll("[data-tile]").forEach(b => b.onclick = () => { if (!quiz.answered) { picked.push(+b.dataset.tile); update(); } });
+  $("#undoTile").onclick = () => { picked.pop(); update(); };
+  $("#checkTiles").onclick = () => {
+    const built = picked.map(i => p.all[i]), ok = key(built.join("")) === key(p.own.map(x => x.t).join(""));
+    const typed = built.map((t, k) => (p.own[k]?.gap ? " " : "") + t).join("");
+    $("#built").classList.add(ok ? "right" : "wrong");
+    answer(ok ? "right" : "wrong", ok ? undefined : typed);
+    update(); // sperrt die Kärtchen, answer() hat answered gesetzt
+  };
+  update();
+}
 const MODE_NAMES = { choose: "Wähle ein Wort", write: "Schreibe das Wort", dictation: "Diktat" };
 const HINT_WAIT = 5;
 // Erste Schreibweise ohne Zusätze in Klammern, Buchstaben noch nicht gezeigter Stellen als Strich
@@ -1458,15 +1495,21 @@ function renderQuiz(app) {
   if (!quiz.queue.length) return finishQuiz();
   const wi = quiz.queue[0], w = list.words[wi];
   // Diktat: das Fremdwort nur hören und schreiben
-  const dict = quiz.mode === "dictation", toFx = dict || prefs.dir === "de-fx";
+  const dict = quiz.mode === "dictation", toFx = dict || quiz.mode === "choose" || prefs.dir === "de-fx";
   const ask = toFx ? w.d : w.f, sol = toFx ? w.f : w.d;
   quiz.current = wi; quiz.answered = false; quiz.hint = 0;
   const pct = Math.round(quiz.done / quiz.total * 100);
   let body;
+  let puzzle = null;
   if (quiz.mode === "choose") {
-    const others = shuffle(list.words.map((x, i) => i).filter(i => i !== wi && norm(toFx ? list.words[i].f : list.words[i].d) !== norm(sol))).slice(0, 3);
-    const opts = shuffle([wi, ...others]);
-    body = `<div class="choices">${opts.map(i => `<button data-opt="${i}">${esc(toFx ? list.words[i].f : list.words[i].d)}</button>`).join("")}</div>`;
+    puzzle = puzzleTiles(list, wi);
+    body = `<div class="puzzle">
+      <div class="built" id="built" aria-live="polite"></div>
+      <div class="tiles" id="tiles">${puzzle.all.map((t, i) => `<button type="button" class="tile" data-tile="${i}">${esc(t)}</button>`).join("")}</div>
+      <div class="row" style="justify-content:center">
+        <button type="button" id="undoTile" disabled>Zurück</button>
+        <button type="button" class="primary" id="checkTiles" disabled>Prüfen</button>
+      </div></div>`;
   } else {
     const acc = toFx ? (ACCENTS[list.lang] || []) : [];
     body = `<form id="wform" class="stack" autocomplete="off">
@@ -1491,7 +1534,7 @@ function renderQuiz(app) {
           <span class="word" id="askWord">${dict ? "Hör gut zu" : toFx ? esc(ask) : sylHTML(ask, list.lang)}</span>
           ${toFx && !quiz.readAsk && !dict ? "" : `<button class="speak" id="sayAsk" aria-label="Vorlesen">${SPEAKER}</button>`}
         </div>
-        <span class="muted small">${quiz.mode === "choose" ? "Wähle die richtige Übersetzung" : dict ? "Schreibe das Wort, das du hörst" : "Schreibe die Übersetzung"}</span>
+        <span class="muted small">${quiz.mode === "choose" ? "Setze das Wort aus den Silben zusammen" : dict ? "Schreibe das Wort, das du hörst" : "Schreibe die Übersetzung"}</span>
       </div>
       ${body}
       <div id="fb"></div>
@@ -1501,15 +1544,8 @@ function renderQuiz(app) {
   if (dict) { speak(w.f, list.lang, null, SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.f, list.lang); }
   else if (!toFx) { speak(w.f, list.lang, $("#askWord"), SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.f, list.lang, $("#askWord")); }
   else if (quiz.readAsk) { speak(w.d, "de-CH", null, SPEAK_PAUSE); $("#sayAsk").onclick = () => speak(w.d, "de-CH"); }
-  if (quiz.mode === "choose") {
-    app.querySelectorAll("[data-opt]").forEach(b => b.onclick = () => {
-      if (quiz.answered) return;
-      const ok = +b.dataset.opt === wi;
-      app.querySelectorAll("[data-opt]").forEach(x => { x.disabled = true; if (+x.dataset.opt === wi) x.classList.add("right"); });
-      if (!ok) b.classList.add("wrong");
-      answer(ok ? "right" : "wrong");
-    });
-  } else {
+  if (quiz.mode === "choose") bindPuzzle(puzzle);
+  else {
     const inp = $("#answer");
     setTimeout(() => inp.focus(), 30);
     bindHint(sol);
@@ -1768,8 +1804,10 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 
 // Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
 const NEWS = {
-  id: "2026-11-12",
+  id: "2026-11-14",
   items: [
+    "«Wähle ein Wort»: Setze das Fremdwort aus Silben und Wörtern in der richtigen Reihenfolge zusammen.",
+    "Das Diktat steht im Menü jetzt vor «Schreibe das Wort».",
     "Bei einem Fehler siehst du deine Eingabe, die falschen Buchstaben sind rot markiert.",
     "Bei richtigen Antworten gibt es fröhliche Emojis.",
     "Tipp beim Schreiben: Pro Klick kommt ein Buchstabe dazu, danach 5 Sekunden warten. Mit Tipp kommt das Wort gleich nochmals.",
