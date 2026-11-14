@@ -315,3 +315,6 @@ body.maint-open { overflow: hidden; }
 .tile:disabled { opacity: .3; }
 .built .tile.on { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
 .built .tile.gap { margin-left: 14px; }
+
+/* Doppelklicks auf Knöpfe markieren keinen Text */
+button, .btn, .tile { -webkit-user-select: none; user-select: none; }
