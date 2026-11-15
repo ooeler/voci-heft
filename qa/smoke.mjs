@@ -19,11 +19,19 @@ try {
   await page.goto(url);
 
   await page.getByRole("button", { name: "Ohne Konto ausprobieren" }).click();
+  // Standard: Schreibe das Wort
+  await page.getByRole("button", { name: "Lernen", exact: true }).first().click();
+  await page.locator("#answer").fill("xyz");
+  await page.locator("#check").click();
+  await page.locator("#fb .feedback").waitFor();
+  await page.goto(url); // Gast bleibt angemeldet, zurück zur Übersicht
+  // Wähle ein Wort: Silben-Puzzle
+  await page.locator("[data-mode=choose]").click();
   await page.getByRole("button", { name: "Lernen", exact: true }).first().click();
   await page.locator("[data-tile]").first().click();
   await page.locator("#checkTiles").click();
   await page.locator("#fb .feedback").waitFor();
-  step("Anmeldeseite, Übersicht und eine Quizfrage");
+  step("Anmeldeseite, Übersicht, Schreiben und Silben-Puzzle");
 
   const libs = await page.evaluate(async () => {
     const { default: Anthropic } = await import("./vendor/anthropic.js");
