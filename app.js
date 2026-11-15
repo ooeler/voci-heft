@@ -39,7 +39,9 @@ const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == n
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* ---------- Geräte-Einstellungen (gelten für alle auf diesem Gerät) ---------- */
-let prefs = Object.assign({ mode: "choose", dir: "de-fx", rate: 0.9, sound: true, voices: {} }, lsGet("voci-heft-prefs", {}));
+let prefs = Object.assign({ mode: "write", dir: "de-fx", rate: 0.9, sound: true, voices: {} }, lsGet("voci-heft-prefs", {}));
+// Standard ist «Schreibe das Wort». Geräte mit altem gespeichertem Standard einmalig umstellen, danach gilt die eigene Wahl.
+if (!prefs.writeDefault) { prefs.mode = "write"; prefs.writeDefault = true; }
 const savePrefs = () => lsSet("voci-heft-prefs", prefs);
 const getApiKey = () => lsGet("voci-heft-apikey", "");
 const setApiKey = k => { try { k ? lsSet("voci-heft-apikey", k) : localStorage.removeItem("voci-heft-apikey"); } catch {} };
@@ -979,11 +981,11 @@ function renderEdit(app, keepStatus) {
     </section>
     <section class="sheet">
       <div class="row between"><h3>Wörter (${L.words.length})</h3><button class="ghost" id="addRow">+ Wort hinzufügen</button></div>
-      <div class="pair-head"><span class="label">Deutsch</span><span class="label" id="fxHead">${esc(L.lang ? langName(L.lang) : "Fremdsprache")}</span><span></span></div>
+      <div class="pair-head"><span class="label" id="fxHead">${esc(L.lang ? langName(L.lang) : "Fremdsprache")}</span><span class="label">Deutsch</span><span></span></div>
       <div class="pairs" id="pairs">
         ${L.words.map((w, i) => `<div class="pair${view.newFrom != null && i >= view.newFrom ? " new" : ""}">
-          <input type="text" aria-label="Deutsch ${i + 1}" id="d${i}" data-i="${i}" data-k="d" maxlength="${MAX_TEXT}" value="${esc(w.d)}">
           <input type="text" aria-label="Fremdwort ${i + 1}" id="f${i}" data-i="${i}" data-k="f" maxlength="${MAX_TEXT}" value="${esc(w.f)}">
+          <input type="text" aria-label="Deutsch ${i + 1}" id="d${i}" data-i="${i}" data-k="d" maxlength="${MAX_TEXT}" value="${esc(w.d)}">
           <button aria-label="Wort entfernen" data-del="${i}">✕</button></div>`).join("")}
       </div>
       ${L.words.length ? `<button class="ghost" id="swapAll" style="align-self:flex-start">Spalten tauschen</button>` : `<p class="muted small">Noch keine Wörter. Scanne ein Foto oder tippe sie ein.</p>`}
@@ -1002,7 +1004,7 @@ function renderEdit(app, keepStatus) {
     $("#saveList").disabled = L.words.filter(w => w.d.trim() && w.f.trim()).length < 2;
   };
   app.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { L.words.splice(+b.dataset.del, 1); view.dirty = true; renderEdit(app, true); });
-  $("#addRow").onclick = () => { L.words.push({ d: "", f: "", ok: 0, ko: 0 }); renderEdit(app, true); $("#d" + (L.words.length - 1))?.focus(); };
+  $("#addRow").onclick = () => { L.words.push({ d: "", f: "", ok: 0, ko: 0 }); renderEdit(app, true); $("#f" + (L.words.length - 1))?.focus(); };
   $("#swapAll")?.addEventListener("click", () => { L.words = L.words.map(w => ({ ...w, d: w.f, f: w.d })); renderEdit(app, true); });
   const addFiles = files => {
     view.photos = [...(view.photos || []), ...[...files].filter(f => f.type.startsWith("image/")).map(f => ({ file: f, url: URL.createObjectURL(f) }))].slice(0, MAX_PHOTOS);
@@ -1442,10 +1444,23 @@ function lev(a, b) {
     d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
   return d[m][n];
 }
+// Abkürzungen und Kurzformen: Beide Schreibweisen sind richtig. Schlüssel ohne Apostroph, weil norm() ihn entfernt.
+// Mehrdeutige Formen wie its, were, ill, well, shell fehlen absichtlich.
+const SHORT_FORMS = {
+  im: "i am", youre: "you are", hes: "he is", shes: "she is", theyre: "they are", ive: "i have", youve: "you have",
+  weve: "we have", theyve: "they have", youll: "you will", theyll: "they will", youd: "you would", theyd: "they would",
+  dont: "do not", doesnt: "does not", didnt: "did not", cant: "cannot", wont: "will not", isnt: "is not", arent: "are not",
+  wasnt: "was not", werent: "were not", havent: "have not", hasnt: "has not", hadnt: "had not", couldnt: "could not",
+  shouldnt: "should not", wouldnt: "would not", mustnt: "must not", lets: "let us", whats: "what is", thats: "that is",
+  theres: "there is", sb: "somebody", someone: "somebody", sth: "something", smb: "somebody", smth: "something",
+  jmd: "jemand", jdn: "jemanden", jdm: "jemandem", jds: "jemandes", etw: "etwas", qn: "quelquun", qc: "quelque chose"
+};
+const canon = s => norm(s).split(" ").map(t => SHORT_FORMS[t] || t).join(" ").replace(/can not/g, "cannot");
 function checkTyped(input, target) {
   const a = norm(input), vs = variants(target);
   if (!a) return "wrong";
   if (vs.includes(a)) return "right";
+  if (vs.some(v => canon(v) === canon(a))) return "variant";
   if (vs.some(v => v.length > 3 && lev(a, v) === 1)) return "almost";
   return "wrong";
 }
@@ -1614,7 +1629,7 @@ function diffHTML(typed, target) {
 function answer(result, typed) {
   const list = getList(quiz.listId), wi = quiz.current, w = list.words[wi];
   quiz.answered = true; quiz.answeredAt = Date.now();
-  const ok = result === "right", hinted = ok && quiz.hint > 0;
+  const ok = result === "right" || result === "variant", hinted = ok && quiz.hint > 0;
   let gained = 0, bonus = 0;
   if (hinted) {
     quiz.combo = 0;
@@ -1655,7 +1670,8 @@ function answer(result, typed) {
   const unlockTimer = setTimeout(unlock, SPEAK_PAUSE + 6000 + w.f.length * 150);
   setTimeout(() => speak(w.f, list.lang, $("#solWord"), SPEAK_PAUSE, unlock));
 
-  const head = hinted ? "Richtig mit Tipp! Gleich nochmals, diesmal ohne Tipp." : ok ? pick(PRAISE) : result === "almost" ? "Fast! Achte auf die Schreibweise." : pick(COMFORT);
+  const head = hinted ? "Richtig mit Tipp! Gleich nochmals, diesmal ohne Tipp."
+    : result === "variant" ? "Richtig! Dieses Wort hat zwei Schreibweisen." : ok ? pick(PRAISE) : result === "almost" ? "Fast! Achte auf die Schreibweise." : pick(COMFORT);
   // Richtig: ein Balken unter den Antworten. Falsch: ein Fenster in der Mitte, damit das richtige Wort im Vordergrund steht.
   const fb = $("#fb");
   fb.classList.toggle("pop", !ok);
@@ -1663,6 +1679,7 @@ function answer(result, typed) {
       <div class="stack" style="gap:2px;min-width:0">
         <strong>${head}</strong>
         <span class="who">${esc(w.d)} = <span class="sol" id="solWord">${sylHTML(w.f, list.lang)}</span></span>
+        ${result === "variant" ? `<span class="small who">Du hast «${esc(String(typed).trim())}» geschrieben, in der Liste steht «${esc(quiz.mode !== "write" || prefs.dir === "de-fx" ? w.f : w.d)}». Beides ist richtig.</span>` : ""}
       </div>
       <div class="row">
         ${gained ? `<span class="gain">+${gained}${bonus ? ` <em>+${bonus} Serie!</em>` : ""}</span>` : ""}
@@ -1832,8 +1849,11 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 
 // Nach einem Update einmal zeigen, was neu ist. Bei jeder Veröffentlichung mit Neuerungen id und Liste anpassen.
 const NEWS = {
-  id: "2026-11-14",
+  id: "2026-11-15",
   items: [
+    "Beim Einlesen und Bearbeiten steht die Fremdsprache links, Deutsch rechts.",
+    "Standard ist jetzt «Schreibe das Wort».",
+    "Kurzformen wie «don't» und «do not» gelten beide als richtig.",
     "«Wähle ein Wort»: Setze das Fremdwort aus Silben und Wörtern in der richtigen Reihenfolge zusammen.",
     "Das Diktat steht im Menü jetzt vor «Schreibe das Wort».",
     "Bei einem Fehler siehst du deine Eingabe, die falschen Buchstaben sind rot markiert.",
